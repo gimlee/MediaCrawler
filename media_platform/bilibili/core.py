@@ -24,7 +24,7 @@
 
 import asyncio
 import os
-# import random  # Removed as we now use fixed config.CRAWLER_MAX_SLEEP_SEC intervals
+# import random  # Removed as crawler sleep intervals are configured by phase
 from asyncio import Task
 from typing import Dict, List, Optional, Tuple, Union
 from datetime import datetime, timedelta
@@ -233,8 +233,8 @@ class BilibiliCrawler(AbstractCrawler):
                 page += 1
 
                 # Sleep after page navigation
-                sleep_seconds = await utils.crawler_sleep()
-                utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
+                utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
 
                 await self.batch_get_video_comments(video_id_list)
 
@@ -314,8 +314,8 @@ class BilibiliCrawler(AbstractCrawler):
                         page += 1
 
                         # Sleep after page navigation
-                        sleep_seconds = await utils.crawler_sleep()
-                        utils.logger.info(f"[BilibiliCrawler.search_by_keywords_in_time_range] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                        sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
+                        utils.logger.info(f"[BilibiliCrawler.search_by_keywords_in_time_range] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
 
                         await self.batch_get_video_comments(video_id_list)
 
@@ -351,11 +351,11 @@ class BilibiliCrawler(AbstractCrawler):
         async with semaphore:
             try:
                 utils.logger.info(f"[BilibiliCrawler.get_comments] begin get video_id: {video_id} comments ...")
-                sleep_seconds = await utils.crawler_sleep()
-                utils.logger.info(f"[BilibiliCrawler.get_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching comments for video {video_id}")
+                sleep_seconds = await utils.crawler_sleep(config.CRAWLER_COMMENT_SLEEP_SEC)
+                utils.logger.info(f"[BilibiliCrawler.get_comments] Sleeping for {sleep_seconds:.2f} seconds after fetching comments for video {video_id}")
                 await self.bili_client.get_video_all_comments(
                     video_id=video_id,
-                    crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
+                    crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
                     is_fetch_sub_comments=config.ENABLE_GET_SUB_COMMENTS,
                     callback=bilibili_store.batch_update_bilibili_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
@@ -381,8 +381,8 @@ class BilibiliCrawler(AbstractCrawler):
             await self.get_specified_videos(video_bvids_list)
             if int(result["page"]["count"]) <= pn * ps:
                 break
-            sleep_seconds = await utils.crawler_sleep()
-            utils.logger.info(f"[BilibiliCrawler.get_creator_videos] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {pn}")
+            sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
+            utils.logger.info(f"[BilibiliCrawler.get_creator_videos] Sleeping for {sleep_seconds:.2f} seconds after page {pn}")
             pn += 1
 
     async def get_specified_videos(self, video_url_list: List[str]):
@@ -430,8 +430,8 @@ class BilibiliCrawler(AbstractCrawler):
                 result = await self.bili_client.get_video_info(aid=aid, bvid=bvid)
 
                 # Sleep after fetching video details
-                sleep_seconds = await utils.crawler_sleep()
-                utils.logger.info(f"[BilibiliCrawler.get_video_info_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching video details {bvid or aid}")
+                sleep_seconds = await utils.crawler_sleep(config.CRAWLER_DETAIL_SLEEP_SEC)
+                utils.logger.info(f"[BilibiliCrawler.get_video_info_task] Sleeping for {sleep_seconds:.2f} seconds after fetching video details {bvid or aid}")
 
                 return result
             except DataFetchError as ex:
@@ -601,8 +601,8 @@ class BilibiliCrawler(AbstractCrawler):
             return
 
         content = await self.bili_client.get_video_media(video_url)
-        sleep_seconds = await utils.crawler_sleep()
-        utils.logger.info(f"[BilibiliCrawler.get_bilibili_video] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching video {aid}")
+        sleep_seconds = await utils.crawler_sleep(config.CRAWLER_DETAIL_SLEEP_SEC)
+        utils.logger.info(f"[BilibiliCrawler.get_bilibili_video] Sleeping for {sleep_seconds:.2f} seconds after fetching video {aid}")
         if content is None:
             return
         extension_file_name = f"video.mp4"
@@ -670,7 +670,7 @@ class BilibiliCrawler(AbstractCrawler):
                 utils.logger.info(f"[BilibiliCrawler.get_fans] begin get creator_id: {creator_id} fans ...")
                 await self.bili_client.get_creator_all_fans(
                     creator_info=creator_info,
-                    crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
+                    crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
                     callback=bilibili_store.batch_update_bilibili_creator_fans,
                     max_count=config.CRAWLER_MAX_CONTACTS_COUNT_SINGLENOTES,
                 )
@@ -693,7 +693,7 @@ class BilibiliCrawler(AbstractCrawler):
                 utils.logger.info(f"[BilibiliCrawler.get_followings] begin get creator_id: {creator_id} followings ...")
                 await self.bili_client.get_creator_all_followings(
                     creator_info=creator_info,
-                    crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
+                    crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
                     callback=bilibili_store.batch_update_bilibili_creator_followings,
                     max_count=config.CRAWLER_MAX_CONTACTS_COUNT_SINGLENOTES,
                 )
@@ -716,7 +716,7 @@ class BilibiliCrawler(AbstractCrawler):
                 utils.logger.info(f"[BilibiliCrawler.get_dynamics] begin get creator_id: {creator_id} dynamics ...")
                 await self.bili_client.get_creator_all_dynamics(
                     creator_info=creator_info,
-                    crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
+                    crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
                     callback=bilibili_store.batch_update_bilibili_creator_dynamics,
                     max_count=config.CRAWLER_MAX_DYNAMICS_COUNT_SINGLENOTES,
                 )

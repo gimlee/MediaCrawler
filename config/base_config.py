@@ -103,10 +103,10 @@ USER_DATA_DIR = "%s_user_data_dir"  # %s will be replaced by platform name
 START_PAGE = 1
 
 # Control the number of crawled videos/posts
-CRAWLER_MAX_NOTES_COUNT = 15
+CRAWLER_MAX_NOTES_COUNT = 100
 
 # Controlling the number of concurrent crawlers
-MAX_CONCURRENCY_NUM = 1
+MAX_CONCURRENCY_NUM = 2
 
 # Whether to enable crawling media mode (including image or video resources), crawling media is not enabled by default
 ENABLE_GET_MEIDAS = False
@@ -139,6 +139,15 @@ FONT_PATH = "./docs/STZHONGS.TTF"
 
 # Crawl interval. Supports fixed seconds, e.g. 10, or random range, e.g. [10, 30].
 CRAWLER_MAX_SLEEP_SEC = [10, 30]
+
+# Search/page-turn sleep interval.
+CRAWLER_PAGE_SLEEP_SEC = [8, 18]
+
+# Detail page/API sleep interval.
+CRAWLER_DETAIL_SLEEP_SEC = [3, 8]
+
+# Comment list/page sleep interval.
+CRAWLER_COMMENT_SLEEP_SEC = [5, 12]
 
 # HTTP request timeout seconds.
 REQUEST_TIMEOUT = 45

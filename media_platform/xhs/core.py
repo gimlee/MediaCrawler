@@ -179,8 +179,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     await self.batch_get_note_comments(note_ids, xsec_tokens)
 
                     # Sleep after each page navigation
-                    sleep_seconds = await utils.crawler_sleep()
-                    utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                    sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
+                    utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
                 except DataFetchError:
                     utils.logger.error("[XiaoHongShuCrawler.search] Get note detail error")
                     break
@@ -208,7 +208,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 continue
 
             # Use fixed crawling interval
-            crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
+            crawl_interval = config.CRAWLER_COMMENT_SLEEP_SEC
             # Get all note information of the creator
             all_notes_list = await self.xhs_client.get_all_notes_by_creator(
                 user_id=user_id,
@@ -307,8 +307,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 note_detail.update({"xsec_token": xsec_token, "xsec_source": xsec_source})
 
                 # Sleep after fetching note detail
-                sleep_seconds = await utils.crawler_sleep()
-                utils.logger.info(f"[get_note_detail_async_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching note {note_id}")
+                sleep_seconds = await utils.crawler_sleep(config.CRAWLER_DETAIL_SLEEP_SEC)
+                utils.logger.info(f"[get_note_detail_async_task] Sleeping for {sleep_seconds:.2f} seconds after fetching note {note_id}")
 
                 return note_detail
 
@@ -344,7 +344,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         async with semaphore:
             utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Begin get note id comments {note_id}")
             # Use fixed crawling interval
-            crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
+            crawl_interval = config.CRAWLER_COMMENT_SLEEP_SEC
             await self.xhs_client.get_note_all_comments(
                 note_id=note_id,
                 xsec_token=xsec_token,

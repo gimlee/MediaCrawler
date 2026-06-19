@@ -176,8 +176,8 @@ class DouYinCrawler(AbstractCrawler):
                 await self.batch_get_note_comments(page_aweme_list)
 
                 # Sleep after each page navigation
-                sleep_seconds = await utils.crawler_sleep()
-                utils.logger.info(f"[DouYinCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
+                utils.logger.info(f"[DouYinCrawler.search] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
             utils.logger.info(f"[DouYinCrawler.search] keyword:{keyword}, aweme_list:{aweme_list}")
 
     async def get_specified_awemes(self):
@@ -221,8 +221,8 @@ class DouYinCrawler(AbstractCrawler):
             try:
                 result = await self.dy_client.get_video_by_id(aweme_id)
                 # Sleep after fetching aweme detail
-                sleep_seconds = await utils.crawler_sleep()
-                utils.logger.info(f"[DouYinCrawler.get_aweme_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching aweme {aweme_id}")
+                sleep_seconds = await utils.crawler_sleep(config.CRAWLER_DETAIL_SLEEP_SEC)
+                utils.logger.info(f"[DouYinCrawler.get_aweme_detail] Sleeping for {sleep_seconds:.2f} seconds after fetching aweme {aweme_id}")
                 return result
             except DataFetchError as ex:
                 utils.logger.error(f"[DouYinCrawler.get_aweme_detail] Get aweme detail error: {ex}")
@@ -252,7 +252,7 @@ class DouYinCrawler(AbstractCrawler):
             try:
                 # Pass the list of keywords to the get_aweme_all_comments method
                 # Use fixed crawling interval
-                crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
+                crawl_interval = config.CRAWLER_COMMENT_SLEEP_SEC
                 await self.dy_client.get_aweme_all_comments(
                     aweme_id=aweme_id,
                     crawl_interval=crawl_interval,

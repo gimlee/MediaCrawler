@@ -318,10 +318,15 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 comment_list = comment_list[:max_count - len(result)]
             if callback:  # If there is a callback function, execute it
                 await callback(video_id, comment_list)
-            sleep_seconds = await utils.crawler_sleep(crawl_interval)
             if not is_fetch_sub_comments:
                 result.extend(comment_list)
+                if is_end or len(result) >= max_count:
+                    break
+                sleep_seconds = await utils.crawler_sleep(crawl_interval)
                 continue
+            if is_end:
+                break
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return result
 
     async def get_video_all_level_two_comments(

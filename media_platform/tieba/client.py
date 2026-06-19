@@ -561,7 +561,7 @@ class BaiduTieBaClient(AbstractApiClient):
                     await self.playwright_page.goto(sub_comment_url, wait_until="domcontentloaded")
 
                     # Wait for page loading, using delay setting from config file
-                    sleep_seconds = await utils.crawler_sleep()
+                    sleep_seconds = await utils.crawler_sleep(config.CRAWLER_COMMENT_SLEEP_SEC)
 
                     # Get page HTML content
                     page_content = await self.playwright_page.content()
@@ -732,7 +732,7 @@ class BaiduTieBaClient(AbstractApiClient):
             await self.playwright_page.goto(creator_url, wait_until="domcontentloaded")
 
             # Wait for page loading, using delay setting from config file
-            sleep_seconds = await utils.crawler_sleep()
+            sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
 
             # Get page content (this API returns JSON)
             page_content = await self.playwright_page.content()

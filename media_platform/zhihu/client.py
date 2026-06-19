@@ -391,6 +391,8 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
 
             result.extend(comments)
             await self.get_comments_all_sub_comments(content, comments, crawl_interval=crawl_interval, callback=callback)
+            if is_end or (max_count is not None and len(result) >= max_count):
+                break
             sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return result
 
