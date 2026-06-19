@@ -20,6 +20,13 @@
 
 # Zhihu platform configuration
 
+# Search results that point to a question only expose one answer by default.
+# When an answer has question_id, fetch up to this many answers from the same question.
+ZHIHU_QUESTION_MAX_ANSWERS = 10
+
+# Max root comments to crawl per Zhihu answer/article/video.
+ZHIHU_MAX_COMMENTS_PER_CONTENT = 50
+
 # Specify Zhihu user URL list
 ZHIHU_CREATOR_URL_LIST = [
     "https://www.zhihu.com/people/yd1234567",

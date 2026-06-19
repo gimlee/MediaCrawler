@@ -19,7 +19,11 @@
 
 
 import argparse
+import asyncio
 import logging
+import random
+from numbers import Real
+from typing import Optional, Sequence
 
 from .crawler_util import *
 from .slider_util import *
@@ -53,3 +57,29 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def get_crawler_sleep_seconds(interval: Optional[object] = None) -> float:
+    if interval is None:
+        import config
+        interval = config.CRAWLER_MAX_SLEEP_SEC
+
+    if isinstance(interval, Sequence) and not isinstance(interval, (str, bytes)):
+        if len(interval) != 2:
+            raise ValueError("Crawler sleep interval range must contain exactly two values")
+        start, end = float(interval[0]), float(interval[1])
+        if start > end:
+            start, end = end, start
+        return random.uniform(start, end)
+
+    if isinstance(interval, Real):
+        return float(interval)
+
+    return float(interval)  # type: ignore[arg-type]
+
+
+async def crawler_sleep(interval: Optional[object] = None) -> float:
+    sleep_seconds = get_crawler_sleep_seconds(interval)
+    if sleep_seconds > 0:
+        await asyncio.sleep(sleep_seconds)
+    return sleep_seconds

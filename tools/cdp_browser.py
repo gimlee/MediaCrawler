@@ -112,8 +112,11 @@ class CDPBrowserManager:
             # 1. Detect browser path
             browser_path = await self._get_browser_path()
 
-            # 2. Get available port
-            self.debug_port = self.launcher.find_available_port(config.CDP_DEBUG_PORT)
+            # 2. Reserve available port for this crawler process
+            self.debug_port = self.launcher.reserve_available_port(
+                config.CDP_DEBUG_PORT,
+                getattr(config, "CDP_PORT_RANGE_SIZE", 10),
+            )
 
             # 3. Launch browser
             await self._launch_browser(browser_path, headless)
@@ -274,10 +277,12 @@ class CDPBrowserManager:
         if not self.launcher.wait_for_browser_ready(
             self.debug_port, config.BROWSER_LAUNCH_TIMEOUT
         ):
+            self.launcher.release_port_reservation()
             raise RuntimeError(f"Browser failed to start within {config.BROWSER_LAUNCH_TIMEOUT} seconds")
 
         # Extra wait for CDP service to fully start
         await asyncio.sleep(1)
+        self.launcher.release_port_reservation()
 
         # Test CDP connection
         if not await self._test_cdp_connection(self.debug_port):

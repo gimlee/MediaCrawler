@@ -503,7 +503,7 @@ class BaiduTieBaClient(AbstractApiClient):
                     comments, crawl_interval=crawl_interval, callback=callback
                 )
 
-                await asyncio.sleep(crawl_interval)
+                sleep_seconds = await utils.crawler_sleep(crawl_interval)
                 current_page += 1
 
             except Exception as e:
@@ -561,7 +561,7 @@ class BaiduTieBaClient(AbstractApiClient):
                     await self.playwright_page.goto(sub_comment_url, wait_until="domcontentloaded")
 
                     # Wait for page loading, using delay setting from config file
-                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                    sleep_seconds = await utils.crawler_sleep()
 
                     # Get page HTML content
                     page_content = await self.playwright_page.content()
@@ -582,7 +582,7 @@ class BaiduTieBaClient(AbstractApiClient):
                         await callback(parment_comment.note_id, sub_comments)
 
                     all_sub_comments.extend(sub_comments)
-                    await asyncio.sleep(crawl_interval)
+                    sleep_seconds = await utils.crawler_sleep(crawl_interval)
                     current_page += 1
 
                 except Exception as e:
@@ -732,7 +732,7 @@ class BaiduTieBaClient(AbstractApiClient):
             await self.playwright_page.goto(creator_url, wait_until="domcontentloaded")
 
             # Wait for page loading, using delay setting from config file
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            sleep_seconds = await utils.crawler_sleep()
 
             # Get page content (this API returns JSON)
             page_content = await self.playwright_page.content()
@@ -802,7 +802,7 @@ class BaiduTieBaClient(AbstractApiClient):
             notes = await asyncio.gather(*note_detail_task)
             if callback:
                 await callback(notes)
-            await asyncio.sleep(crawl_interval)
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
             result.extend(notes)
             page_number += 1
             total_get_count += page_per_count
@@ -859,7 +859,7 @@ class BaiduTieBaClient(AbstractApiClient):
             if not has_more:
                 break
 
-            await asyncio.sleep(crawl_interval)
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
             page_number += 1
 
         return result

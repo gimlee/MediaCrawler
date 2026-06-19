@@ -41,6 +41,8 @@ class BrowserLauncher:
         self.system = platform.system()
         self.browser_process = None
         self.debug_port = None
+        self._port_lock_fd: Optional[int] = None
+        self._port_lock_path: Optional[str] = None
 
     def detect_browser_paths(self) -> List[str]:
         """
@@ -116,6 +118,55 @@ class BrowserLauncher:
 
         raise RuntimeError(f"Cannot find available port, tried {start_port} to {port-1}")
 
+    def reserve_available_port(self, start_port: int = 9222, port_count: int = 10) -> int:
+        """
+        Reserve an available port across concurrent crawler processes.
+        """
+        lock_dir = os.path.join(os.getcwd(), "browser_data", "cdp_port_locks")
+        os.makedirs(lock_dir, exist_ok=True)
+
+        for port in range(start_port, start_port + port_count):
+            lock_path = os.path.join(lock_dir, f"{port}.lock")
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(("localhost", port))
+
+                lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                os.write(lock_fd, str(os.getpid()).encode("utf-8"))
+                self._port_lock_fd = lock_fd
+                self._port_lock_path = lock_path
+                return port
+            except FileExistsError:
+                continue
+            except OSError:
+                continue
+
+        raise RuntimeError(
+            f"Cannot reserve available CDP port, tried {start_port} to {start_port + port_count - 1}"
+        )
+
+    def release_port_reservation(self):
+        """
+        Release the temporary port reservation after the browser binds the port.
+        """
+        if self._port_lock_fd is not None:
+            try:
+                os.close(self._port_lock_fd)
+            except OSError:
+                pass
+            finally:
+                self._port_lock_fd = None
+
+        if self._port_lock_path:
+            try:
+                os.unlink(self._port_lock_path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                utils.logger.warning(f"[BrowserLauncher] Failed to remove port lock: {e}")
+            finally:
+                self._port_lock_path = None
+
     def launch_browser(self, browser_path: str, debug_port: int, headless: bool = False,
                       user_data_dir: Optional[str] = None) -> subprocess.Popen:
         """
@@ -186,6 +237,7 @@ class BrowserLauncher:
 
         except Exception as e:
             utils.logger.error(f"[BrowserLauncher] Failed to launch browser: {e}")
+            self.release_port_reservation()
             raise
 
     def wait_for_browser_ready(self, debug_port: int, timeout: int = 30) -> bool:
@@ -289,3 +341,4 @@ class BrowserLauncher:
             utils.logger.warning(f"[BrowserLauncher] Error closing browser process: {e}")
         finally:
             self.browser_process = None
+            self.release_port_reservation()

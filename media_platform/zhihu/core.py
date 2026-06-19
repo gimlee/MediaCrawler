@@ -186,10 +186,11 @@ class ZhihuCrawler(AbstractCrawler):
                         break
 
                     # Sleep after page navigation
-                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                    utils.logger.info(f"[ZhihuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                    sleep_seconds = await utils.crawler_sleep()
+                    utils.logger.info(f"[ZhihuCrawler.search] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
 
                     page += 1
+                    content_list = await self.expand_question_answers(content_list)
                     for content in content_list:
                         await zhihu_store.update_zhihu_content(content)
 
@@ -240,14 +241,51 @@ class ZhihuCrawler(AbstractCrawler):
             )
 
             # Sleep before fetching comments
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            sleep_seconds = await utils.crawler_sleep()
             utils.logger.info(f"[ZhihuCrawler.get_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for content {content_item.content_id}")
 
             await self.zhihu_client.get_note_all_comments(
                 content=content_item,
                 crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                 callback=zhihu_store.batch_update_zhihu_note_comments,
+                max_count=config.ZHIHU_MAX_COMMENTS_PER_CONTENT,
             )
+
+    async def expand_question_answers(
+        self, content_list: List[ZhihuContent]
+    ) -> List[ZhihuContent]:
+        """
+        Expand answer search results to more answers under the same question.
+        """
+        max_answers = getattr(config, "ZHIHU_QUESTION_MAX_ANSWERS", 10)
+        if max_answers <= 1:
+            return content_list
+
+        expanded_contents: Dict[str, ZhihuContent] = {}
+        for content in content_list:
+            if content.content_id:
+                expanded_contents[content.content_id] = content
+            if content.content_type != constant.ANSWER_NAME or not content.question_id:
+                continue
+
+            try:
+                answers = await self.zhihu_client.get_question_answer_contents(
+                    question_id=content.question_id,
+                    max_count=max_answers,
+                    crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
+                )
+                utils.logger.info(
+                    f"[ZhihuCrawler.expand_question_answers] Question {content.question_id} expanded to {len(answers)} answers"
+                )
+                for answer in answers:
+                    if answer.content_id:
+                        expanded_contents[answer.content_id] = answer
+            except DataFetchError as e:
+                utils.logger.warning(
+                    f"[ZhihuCrawler.expand_question_answers] Failed to fetch answers for question {content.question_id}: {e}"
+                )
+
+        return list(expanded_contents.values())
 
     async def get_creators_and_notes(self) -> None:
         """
@@ -331,7 +369,7 @@ class ZhihuCrawler(AbstractCrawler):
                 result = await self.zhihu_client.get_answer_info(question_id, answer_id)
 
                 # Sleep after fetching answer details
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                sleep_seconds = await utils.crawler_sleep()
                 utils.logger.info(f"[ZhihuCrawler.get_note_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching answer details {answer_id}")
 
                 return result
@@ -344,7 +382,7 @@ class ZhihuCrawler(AbstractCrawler):
                 result = await self.zhihu_client.get_article_info(article_id)
 
                 # Sleep after fetching article details
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                sleep_seconds = await utils.crawler_sleep()
                 utils.logger.info(f"[ZhihuCrawler.get_note_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching article details {article_id}")
 
                 return result
@@ -357,7 +395,7 @@ class ZhihuCrawler(AbstractCrawler):
                 result = await self.zhihu_client.get_video_info(video_id)
 
                 # Sleep after fetching video details
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                sleep_seconds = await utils.crawler_sleep()
                 utils.logger.info(f"[ZhihuCrawler.get_note_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching video details {video_id}")
 
                 return result

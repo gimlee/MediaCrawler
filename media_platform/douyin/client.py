@@ -283,7 +283,7 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
             if callback:  # If there is a callback function, execute the callback function
                 await callback(aweme_id, comments)
 
-            await asyncio.sleep(crawl_interval)
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
             if not is_fetch_sub_comments:
                 continue
             # Get secondary reviews
@@ -306,7 +306,7 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
                         result.extend(sub_comments)
                         if callback:  # If there is a callback function, execute the callback function
                             await callback(aweme_id, sub_comments)
-                        await asyncio.sleep(crawl_interval)
+                        sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return result
 
     async def get_user_info(self, sec_user_id: str):

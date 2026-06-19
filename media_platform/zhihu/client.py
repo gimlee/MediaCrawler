@@ -228,6 +228,66 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         utils.logger.info(f"[ZhiHuClient.get_note_by_keyword] Search result: {search_res}")
         return self._extractor.extract_contents_from_search(search_res)
 
+    async def get_question_answers(
+        self,
+        question_id: str,
+        offset: int = 0,
+        limit: int = 10,
+    ) -> Dict:
+        """
+        Get answers under a question.
+        """
+        uri = f"/api/v4/questions/{question_id}/answers"
+        params = {
+            "include":
+            "data[*].is_normal,admin_closed_comment,reward_info,is_collapsed,annotation_action,annotation_detail,collapse_reason,collapsed_by,suggest_edit,comment_count,can_comment,content,editable_content,attachment,voteup_count,created_time,updated_time,review_info,excerpt,paid_info,reaction_instruction,is_labeled,label_info,relationship.is_authorized,voting,is_author,is_thanked,is_nothelp;data[*].author.badge[?(type=best_answerer)].topics;data[*].author.vip_info;data[*].question.has_publishing_draft,relationship",
+            "offset": offset,
+            "limit": limit,
+            "platform": "desktop",
+            "sort_by": "default",
+        }
+        return await self.get(uri, params)
+
+    async def get_question_answer_contents(
+        self,
+        question_id: str,
+        max_count: int = 10,
+        crawl_interval: float = 1.0,
+    ) -> List[ZhihuContent]:
+        """
+        Get up to max_count answers under a question.
+        """
+        if not question_id or max_count <= 0:
+            return []
+
+        result: List[ZhihuContent] = []
+        offset = 0
+        limit = min(max_count, 20)
+        is_end = False
+        while not is_end and len(result) < max_count:
+            page_limit = min(limit, max_count - len(result))
+            answers_res = await self.get_question_answers(question_id, offset, page_limit)
+            if not answers_res:
+                break
+
+            paging_info = answers_res.get("paging", {})
+            is_end = paging_info.get("is_end", True)
+            contents = self._extractor.extract_content_list_from_creator(
+                answers_res.get("data", [])
+            )
+            if not contents:
+                break
+
+            result.extend(contents[: max_count - len(result)])
+            offset += page_limit
+            if not is_end and len(result) < max_count:
+                sleep_seconds = await utils.crawler_sleep(crawl_interval)
+                utils.logger.info(
+                    f"[ZhiHuClient.get_question_answer_contents] Sleeping for {sleep_seconds:.2f} seconds before next answer page for question {question_id}"
+                )
+
+        return result
+
     async def get_root_comments(
         self,
         content_id: str,
@@ -290,6 +350,7 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         content: ZhihuContent,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        max_count: Optional[int] = None,
     ) -> List[ZhihuComment]:
         """
         Get all root-level comments for a specified post, this method will retrieve all comment information under a post
@@ -307,6 +368,8 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         prev_offset: str = ""
         limit: int = 10
         while not is_end:
+            if max_count is not None and len(result) >= max_count:
+                break
             prev_offset = offset
             root_comment_res = await self.get_root_comments(content.content_id, content.content_type, offset, limit)
             if not root_comment_res:
@@ -322,12 +385,16 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
             if prev_offset == offset:
                 break
 
+            if max_count is not None:
+                remaining_count = max_count - len(result)
+                comments = comments[:remaining_count]
+
             if callback:
                 await callback(comments)
 
             result.extend(comments)
             await self.get_comments_all_sub_comments(content, comments, crawl_interval=crawl_interval, callback=callback)
-            await asyncio.sleep(crawl_interval)
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return result
 
     async def get_comments_all_sub_comments(
@@ -380,7 +447,7 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                     await callback(sub_comments)
 
                 all_sub_comments.extend(sub_comments)
-                await asyncio.sleep(crawl_interval)
+                sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return all_sub_comments
 
     async def get_creator_info(self, url_token: str) -> Optional[ZhihuCreator]:
@@ -486,7 +553,7 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(contents)
             all_contents.extend(contents)
             offset += limit
-            await asyncio.sleep(crawl_interval)
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return all_contents
 
     async def get_all_articles_by_creator(
@@ -520,7 +587,7 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(contents)
             all_contents.extend(contents)
             offset += limit
-            await asyncio.sleep(crawl_interval)
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return all_contents
 
     async def get_all_videos_by_creator(
@@ -554,7 +621,7 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(contents)
             all_contents.extend(contents)
             offset += limit
-            await asyncio.sleep(crawl_interval)
+            sleep_seconds = await utils.crawler_sleep(crawl_interval)
         return all_contents
 
     async def get_answer_info(

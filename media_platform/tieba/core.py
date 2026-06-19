@@ -197,7 +197,7 @@ class TieBaCrawler(AbstractCrawler):
                     )
 
                     # Sleep after page navigation
-                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                    sleep_seconds = await utils.crawler_sleep()
                     utils.logger.info(f"[TieBaCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page}")
 
                     page += 1
@@ -239,7 +239,7 @@ class TieBaCrawler(AbstractCrawler):
                 await self.get_specified_notes([note.note_id for note in note_list])
 
                 # Sleep after processing notes
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                sleep_seconds = await utils.crawler_sleep()
                 utils.logger.info(f"[TieBaCrawler.get_specified_tieba_notes] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after processing notes from page {page_number}")
 
                 page_number += tieba_limit_count
@@ -290,7 +290,7 @@ class TieBaCrawler(AbstractCrawler):
                 note_detail: TiebaNote = await self.tieba_client.get_note_by_id(note_id)
 
                 # Sleep after fetching note details
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                sleep_seconds = await utils.crawler_sleep()
                 utils.logger.info(f"[TieBaCrawler.get_note_detail_async_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching note details {note_id}")
 
                 if not note_detail:
@@ -350,7 +350,7 @@ class TieBaCrawler(AbstractCrawler):
             )
 
             # Sleep before fetching comments
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            sleep_seconds = await utils.crawler_sleep()
             utils.logger.info(f"[TieBaCrawler.get_comments_async_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for note {note_detail.note_id}")
 
             await self.tieba_client.get_note_all_comments(
@@ -418,7 +418,7 @@ class TieBaCrawler(AbstractCrawler):
 
             # Step 2: Wait for page loading, using delay setting from config file
             utils.logger.info(f"[TieBaCrawler] Step 2: Waiting {config.CRAWLER_MAX_SLEEP_SEC} seconds to simulate user browsing...")
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            sleep_seconds = await utils.crawler_sleep()
 
             # Step 3: Find and click "Tieba" link
             utils.logger.info("[TieBaCrawler] Step 3: Finding and clicking 'Tieba' link...")
@@ -478,7 +478,7 @@ class TieBaCrawler(AbstractCrawler):
 
             # Step 5: Wait for page to stabilize, using delay setting from config file
             utils.logger.info(f"[TieBaCrawler] Step 5: Page loaded, waiting {config.CRAWLER_MAX_SLEEP_SEC} seconds...")
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            sleep_seconds = await utils.crawler_sleep()
 
             current_url = self.context_page.url
             utils.logger.info(f"[TieBaCrawler] Successfully entered Tieba via Baidu homepage! Current URL: {current_url}")
