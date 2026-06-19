@@ -21,7 +21,6 @@
 import asyncio
 import os
 # import random  # Removed as crawler sleep intervals are configured by phase
-import time
 from asyncio import Task
 from typing import Dict, List, Optional, Tuple
 
@@ -328,17 +327,33 @@ class KuaishouCrawler(AbstractCrawler):
                 utils.logger.error(
                     f"[KuaishouCrawler.get_comments] may be been blocked, err:{e}"
                 )
-                # use time.sleeep block main coroutine instead of asyncio.sleep and cacel running comment task
-                # maybe kuaishou block our request, we will take a nap and update the cookie again
-                current_running_tasks = comment_tasks_var.get()
-                for task in current_running_tasks:
-                    task.cancel()
-                time.sleep(20)
-                await self.context_page.goto(f"{self.index_url}?isHome=1")
-                await self.ks_client.update_cookies(
-                    browser_context=self.browser_context,
-                    urls=self.cookie_urls,
+                await self.try_refresh_cookies_after_comment_error(video_id)
+
+    async def try_refresh_cookies_after_comment_error(self, video_id: str) -> None:
+        """Best-effort cookie refresh after a comment request failure."""
+        try:
+            sleep_seconds = await utils.crawler_sleep(config.CRAWLER_COMMENT_SLEEP_SEC)
+            utils.logger.info(
+                f"[KuaishouCrawler.try_refresh_cookies_after_comment_error] Sleeping for {sleep_seconds:.2f} seconds before refreshing cookies for video {video_id}"
+            )
+            if self.context_page.is_closed():
+                utils.logger.warning(
+                    f"[KuaishouCrawler.try_refresh_cookies_after_comment_error] Page is closed, skip cookie refresh for video {video_id}"
                 )
+                return
+            await self.context_page.goto(
+                f"{self.index_url}?isHome=1",
+                wait_until="domcontentloaded",
+                timeout=int(config.REQUEST_TIMEOUT * 1000),
+            )
+            await self.ks_client.update_cookies(
+                browser_context=self.browser_context,
+                urls=self.cookie_urls,
+            )
+        except Exception as refresh_error:
+            utils.logger.warning(
+                f"[KuaishouCrawler.try_refresh_cookies_after_comment_error] Cookie refresh failed for video {video_id}, skip this recovery step: {refresh_error}"
+            )
 
     async def create_ks_client(self, httpx_proxy: Optional[str]) -> KuaiShouClient:
         """Create ks client"""

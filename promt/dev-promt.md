@@ -339,6 +339,13 @@ locked_until
 # P14
 请按照你的方案，实现第一版做到“页面 + 内容 + 评论任务级别”的续爬
 
+# P15
+执行：uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres
+报错：
+![alt text](image-2.png)
+修复这个问题
+
+
 
 
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
