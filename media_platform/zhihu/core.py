@@ -41,6 +41,7 @@ from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import zhihu as zhihu_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.resume_manager import resume_manager
 from var import crawler_type_var, source_keyword_var
 
 from .client import ZhiHuClient
@@ -167,8 +168,13 @@ class ZhihuCrawler(AbstractCrawler):
                     utils.logger.info(f"[ZhihuCrawler.search] Skip page {page}")
                     page += 1
                     continue
+                if resume_manager.is_page_done(keyword, page):
+                    utils.logger.info(f"[ZhihuCrawler.search] Resume skip done page, keyword: {keyword}, page: {page}")
+                    page += 1
+                    continue
 
                 try:
+                    resume_manager.mark_page_running(keyword, page)
                     utils.logger.info(
                         f"[ZhihuCrawler.search] search zhihu keyword: {keyword}, page: {page}"
                     )
@@ -192,10 +198,22 @@ class ZhihuCrawler(AbstractCrawler):
                     page += 1
                     content_list = await self.expand_question_answers(content_list)
                     for content in content_list:
-                        await zhihu_store.update_zhihu_content(content)
+                        resume_manager.upsert_item(content.content_id, keyword=keyword, content_type=content.content_type)
+                        if resume_manager.should_skip_detail(content.content_id):
+                            utils.logger.info(f"[ZhihuCrawler.search] Resume skip done content detail: {content.content_id}")
+                            continue
+                        try:
+                            resume_manager.mark_detail_running(content.content_id, keyword=keyword, content_type=content.content_type)
+                            await zhihu_store.update_zhihu_content(content)
+                            resume_manager.mark_detail_done(content.content_id, keyword=keyword, content_type=content.content_type)
+                        except Exception:
+                            resume_manager.mark_detail_failed(content.content_id, keyword=keyword, content_type=content.content_type)
+                            raise
 
                     await self.batch_get_content_comments(content_list)
+                    resume_manager.mark_page_done(keyword, page - 1)
                 except DataFetchError:
+                    resume_manager.mark_page_failed(keyword, page)
                     utils.logger.error("[ZhihuCrawler.search] Search content error")
                     return
 
@@ -217,6 +235,9 @@ class ZhihuCrawler(AbstractCrawler):
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for content_item in content_list:
+            if resume_manager.should_skip_comment(content_item.content_id):
+                utils.logger.info(f"[ZhihuCrawler.batch_get_content_comments] Resume skip done comments, content_id: {content_item.content_id}")
+                continue
             task = asyncio.create_task(
                 self.get_comments(content_item, semaphore), name=content_item.content_id
             )
@@ -239,17 +260,35 @@ class ZhihuCrawler(AbstractCrawler):
             utils.logger.info(
                 f"[ZhihuCrawler.get_comments] Begin get note id comments {content_item.content_id}"
             )
+            resume_manager.mark_comment_running(
+                content_item.content_id,
+                keyword=source_keyword_var.get(),
+                content_type=content_item.content_type,
+            )
 
             # Sleep before fetching comments
             sleep_seconds = await utils.crawler_sleep(config.CRAWLER_COMMENT_SLEEP_SEC)
             utils.logger.info(f"[ZhihuCrawler.get_comments] Sleeping for {sleep_seconds:.2f} seconds before fetching comments for content {content_item.content_id}")
 
-            await self.zhihu_client.get_note_all_comments(
-                content=content_item,
-                crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
-                callback=zhihu_store.batch_update_zhihu_note_comments,
-                max_count=config.ZHIHU_MAX_COMMENTS_PER_CONTENT,
-            )
+            try:
+                await self.zhihu_client.get_note_all_comments(
+                    content=content_item,
+                    crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
+                    callback=zhihu_store.batch_update_zhihu_note_comments,
+                    max_count=config.ZHIHU_MAX_COMMENTS_PER_CONTENT,
+                )
+                resume_manager.mark_comment_done(
+                    content_item.content_id,
+                    keyword=source_keyword_var.get(),
+                    content_type=content_item.content_type,
+                )
+            except Exception:
+                resume_manager.mark_comment_failed(
+                    content_item.content_id,
+                    keyword=source_keyword_var.get(),
+                    content_type=content_item.content_type,
+                )
+                raise
 
     async def expand_question_answers(
         self, content_list: List[ZhihuContent]
@@ -407,9 +446,17 @@ class ZhihuCrawler(AbstractCrawler):
 
         """
         get_note_detail_task_list = []
+        task_urls = []
         for full_note_url in config.ZHIHU_SPECIFIED_ID_LIST:
             # remove query params
             full_note_url = full_note_url.split("?")[0]
+            note_type = judge_zhihu_url(full_note_url)
+            content_id = full_note_url.split("/")[-1]
+            resume_manager.upsert_item(content_id, content_type=note_type)
+            if resume_manager.should_skip_detail(content_id) and resume_manager.should_skip_comment(content_id):
+                utils.logger.info(f"[ZhihuCrawler.get_specified_notes] Resume skip done content: {content_id}")
+                continue
+            task_urls.append(full_note_url)
             crawler_task = self.get_note_detail(
                 full_note_url=full_note_url,
                 semaphore=asyncio.Semaphore(config.MAX_CONCURRENCY_NUM),
@@ -421,13 +468,15 @@ class ZhihuCrawler(AbstractCrawler):
         for index, note_detail in enumerate(note_details):
             if not note_detail:
                 utils.logger.info(
-                    f"[ZhihuCrawler.get_specified_notes] Note {config.ZHIHU_SPECIFIED_ID_LIST[index]} not found"
+                    f"[ZhihuCrawler.get_specified_notes] Note {task_urls[index]} not found"
                 )
+                resume_manager.mark_detail_failed(task_urls[index].split("/")[-1])
                 continue
 
             note_detail = cast(ZhihuContent, note_detail)  # only for type check
             need_get_comment_notes.append(note_detail)
             await zhihu_store.update_zhihu_content(note_detail)
+            resume_manager.mark_detail_done(note_detail.content_id, content_type=note_detail.content_type)
 
         await self.batch_get_content_comments(need_get_comment_notes)
 

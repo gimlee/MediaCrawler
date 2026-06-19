@@ -332,6 +332,32 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 rich_help_panel="Proxy Configuration",
             ),
         ] = config.STATIC_PROXY_URL,
+        resume: Annotated[
+            bool,
+            typer.Option(
+                "--resume/--no_resume",
+                help="Whether to enable resumable crawling checkpoints",
+                rich_help_panel="Resume Configuration",
+                show_default=True,
+            ),
+        ] = config.ENABLE_RESUME,
+        reset_resume: Annotated[
+            bool,
+            typer.Option(
+                "--reset_resume",
+                help="Clear the current resume checkpoint before crawling",
+                rich_help_panel="Resume Configuration",
+                show_default=True,
+            ),
+        ] = config.RESET_RESUME_STATE,
+        resume_task_id: Annotated[
+            str,
+            typer.Option(
+                "--resume_task_id",
+                help="Custom resume task id. Empty means auto-generate from the command config",
+                rich_help_panel="Resume Configuration",
+            ),
+        ] = config.RESUME_TASK_ID,
     ) -> SimpleNamespace:
         """MediaCrawler 命令行入口"""
 
@@ -339,6 +365,8 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         enable_sub_comment = _to_bool(get_sub_comment)
         enable_headless = _to_bool(headless)
         enable_ip_proxy_value = _to_bool(enable_ip_proxy)
+        enable_resume = _to_bool(resume)
+        reset_resume_value = _to_bool(reset_resume)
         init_db_value = init_db.value if init_db else None
 
         # Parse specified_id and creator_id into lists
@@ -365,6 +393,9 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         config.IP_PROXY_POOL_COUNT = ip_proxy_pool_count
         config.IP_PROXY_PROVIDER_NAME = ip_proxy_provider_name
         config.STATIC_PROXY_URL = static_proxy_url
+        config.ENABLE_RESUME = enable_resume
+        config.RESET_RESUME_STATE = reset_resume_value
+        config.RESUME_TASK_ID = resume_task_id
 
         # Set platform-specific ID lists for detail/creator mode
         if specified_id_list:
@@ -415,6 +446,9 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             cookies=config.COOKIES,
             specified_id=specified_id,
             creator_id=creator_id,
+            resume=config.ENABLE_RESUME,
+            reset_resume=config.RESET_RESUME_STATE,
+            resume_task_id=config.RESUME_TASK_ID,
         )
 
     command = typer.main.get_command(app)

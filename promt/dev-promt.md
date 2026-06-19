@@ -153,6 +153,194 @@ CRAWLER_COMMENT_SLEEP_SEC = [5, 12]
 把一个总 sleep 拆成分阶段配置。
 
 
+# P13
+需要给各个平台爬取内容和评论等信息的时候，增加断点续爬功能。
+请给出你的实现方案。
+
+## AI回答：
+我的实现建议是做成一个**平台无关的断点续爬层**，不要把逻辑散落到各个平台里。
+
+**核心思路**
+断点状态分两层记录：
+1. **搜索/列表页进度**
+   记录某个平台、某个关键词、某种爬取类型已经爬到第几页。
+2. **单条内容进度**
+   记录每条内容是否已经完成：
+   - 内容详情是否已抓取
+   - 评论是否已抓取
+   - 评论抓到哪个 cursor / page / offset
+   - 失败次数
+这样即使程序在“第 5 页第 8 条内容的评论第 3 页”崩了，重启后也不会从头开始，也不会误跳过未完成内容。
+
+**建议新增配置**
+```python
+ENABLE_RESUME = True
+
+RESUME_STATE_BACKEND = "sqlite"
+RESUME_STATE_DIR = "data/resume"
+
+RESUME_RETRY_FAILED = True
+RESUME_ITEM_MAX_FAILED_TIMES = 3
+
+# 可选：手动指定一次任务 ID
+RESUME_TASK_ID = ""
+```
+
+同时命令行增加：
+```bash
+--resume
+--no_resume
+--reset_resume
+--resume_task_id xxx
+```
+默认行为建议是：同一个命令再次执行，自动续爬。
+例如：
+```bash
+uv run main.py --platform zhihu --lt qrcode --type search --save_data_option postgres
+```
+
+再次执行同样命令时，自动从上次中断位置继续。
+**状态存储方案**
+我建议用一个独立的本地 SQLite 文件保存断点状态，即使实际内容写入 Postgres，也不要强绑定断点状态到业务库。
+
+原因是：
+- JSON / CSV / SQLite / Postgres 保存模式都能统一支持
+- 多进程同时跑不同平台时，SQLite + WAL 可以保证原子更新
+- 不污染业务数据表
+- 后续也可以切换到 Postgres
+
+新增类似：
+```text
+data/resume/
+  zhihu_search_ai_xxx.sqlite
+  xhs_search_ai_xxx.sqlite
+```
+
+**表结构设计**
+页面进度表：
+```sql
+CREATE TABLE crawler_resume_pages (
+    resume_key TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    crawler_type TEXT NOT NULL,
+    keyword TEXT NOT NULL,
+    page INTEGER NOT NULL,
+    cursor TEXT,
+    status TEXT NOT NULL,
+    fail_count INTEGER DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (resume_key, keyword, page)
+);
+```
+
+内容进度表：
+```sql
+CREATE TABLE crawler_resume_items (
+    resume_key TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    keyword TEXT,
+    content_id TEXT NOT NULL,
+    content_type TEXT,
+    detail_status TEXT DEFAULT 'pending',
+    comment_status TEXT DEFAULT 'pending',
+    comment_cursor TEXT,
+    comment_done_count INTEGER DEFAULT 0,
+    fail_count INTEGER DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (resume_key, platform, content_id)
+);
+```
+
+`comment_cursor` 用 JSON 存，例如：
+```json
+{
+  "page": 3,
+  "cursor": "xxx",
+  "offset": 20,
+  "next_page": 4
+}
+```
+
+不同平台字段不同，但统一塞进 JSON。
+**执行流程**
+搜索模式大概变成：
+
+```text
+for keyword in KEYWORDS:
+    for page in pages:
+        如果 page 已 done，跳过
+
+        请求搜索页
+        把返回的 content_id 写入 resume_items
+
+        for content in contents:
+            如果 detail_status = done，跳过详情
+            否则抓详情 -> 写 DB -> 标记 detail done
+
+            如果开启评论：
+                如果 comment_status = done，跳过评论
+                否则从 comment_cursor 继续抓评论
+                每抓完一页评论，更新 comment_cursor
+                全部完成后标记 comment done
+
+        当前 page 下所有内容都完成后，标记 page done
+```
+
+注意这里有个关键点：**不能搜索页一请求成功就标记 page done**。  
+必须等这一页的内容详情和评论都处理完，才能标记 page done，否则崩溃后容易漏抓评论。
+
+**评论断点**
+评论建议分两期做。
+第一期先实现“内容级断点”：
+- 内容 A 评论没抓完，重启后重新抓内容 A 的评论
+- 依赖 DB 的唯一键 / upsert 去重
+- 实现成本低，立刻能解决大部分中断重跑问题
+
+第二期再实现“评论页级断点”：
+- 每个平台评论接口保存自己的 cursor / page / offset
+- 重启后从评论第 N 页继续
+- 对长评论内容更高效
+因为各平台评论分页方式不同，强行一次性做精确评论续爬，改动会比较大。
+**去重配合**
+断点续爬要和去重一起做。
+DB 写入层应该保证：
+- 内容表按 `platform + content_id` 唯一
+- 评论表按 `platform + comment_id` 唯一
+- 二级评论同理
+- 写入使用 upsert 或 insert-ignore/update
+这样即使某条内容因为崩溃被重新请求，也不会重复写入 DB。
+**并发安全**
+为了支持多个平台同时跑，断点层要做两件事：
+1. 不同平台使用不同 `resume_key`
+2. 同一个 `resume_key` 下的 item 处理要有状态锁
+状态可以是：
+```text
+pending
+running
+done
+failed
+```
+可选加：
+
+```text
+locked_until
+```
+避免同一个任务被两个进程同时处理。
+**我建议的落地顺序**
+1. 新增 `tools/resume_manager.py`
+2. 新增断点配置和命令行参数
+3. 先接入所有平台的 search 页级断点
+4. 再接入内容详情级断点
+5. 再接入评论内容级断点
+6. 最后逐个平台补精确评论 cursor 续爬
+第一版做到“页面 + 内容 + 评论任务级别”的续爬，就已经能解决大部分中断后从头爬的问题；第二版再优化到“评论分页级别”的精确续爬。
+
+
+# P14
+请按照你的方案，实现第一版做到“页面 + 内容 + 评论任务级别”的续爬
+
+
+
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform tieba --lt qrcode --type search --save_data_option postgres

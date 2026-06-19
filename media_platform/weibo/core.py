@@ -42,6 +42,7 @@ from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import weibo as weibo_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.resume_manager import resume_manager
 from var import crawler_type_var, source_keyword_var
 
 from .client import WeiboClient
@@ -167,6 +168,11 @@ class WeiboCrawler(AbstractCrawler):
                     utils.logger.info(f"[WeiboCrawler.search] Skip page: {page}")
                     page += 1
                     continue
+                if resume_manager.is_page_done(keyword, page):
+                    utils.logger.info(f"[WeiboCrawler.search] Resume skip done page, keyword: {keyword}, page: {page}")
+                    page += 1
+                    continue
+                resume_manager.mark_page_running(keyword, page)
                 utils.logger.info(f"[WeiboCrawler.search] search weibo keyword: {keyword}, page: {page}")
                 search_res = await self.wb_client.get_note_by_keyword(keyword=keyword, page=page, search_type=search_type)
                 note_id_list: List[str] = []
@@ -177,9 +183,22 @@ class WeiboCrawler(AbstractCrawler):
                     if note_item:
                         mblog: Dict = note_item.get("mblog")
                         if mblog:
-                            note_id_list.append(mblog.get("id"))
-                            await weibo_store.update_weibo_note(note_item)
-                            await self.get_note_images(mblog)
+                            note_id = mblog.get("id")
+                            if not note_id:
+                                continue
+                            resume_manager.upsert_item(note_id, keyword=keyword, content_type="note")
+                            note_id_list.append(note_id)
+                            if resume_manager.should_skip_detail(note_id):
+                                utils.logger.info(f"[WeiboCrawler.search] Resume skip done note detail: {note_id}")
+                                continue
+                            try:
+                                resume_manager.mark_detail_running(note_id, keyword=keyword, content_type="note")
+                                await weibo_store.update_weibo_note(note_item)
+                                await self.get_note_images(mblog)
+                                resume_manager.mark_detail_done(note_id, keyword=keyword, content_type="note")
+                            except Exception:
+                                resume_manager.mark_detail_failed(note_id, keyword=keyword, content_type="note")
+                                raise
 
                 page += 1
 
@@ -188,6 +207,7 @@ class WeiboCrawler(AbstractCrawler):
                 utils.logger.info(f"[WeiboCrawler.search] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
 
                 await self.batch_get_notes_comments(note_id_list)
+                resume_manager.mark_page_done(keyword, page - 1)
 
     async def get_specified_notes(self):
         """
@@ -195,11 +215,23 @@ class WeiboCrawler(AbstractCrawler):
         :return:
         """
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list = [self.get_note_info_task(note_id=note_id, semaphore=semaphore) for note_id in config.WEIBO_SPECIFIED_ID_LIST]
+        pending_note_ids = []
+        task_list = []
+        for note_id in config.WEIBO_SPECIFIED_ID_LIST:
+            resume_manager.upsert_item(note_id, content_type="note")
+            if resume_manager.should_skip_detail(note_id):
+                utils.logger.info(f"[WeiboCrawler.get_specified_notes] Resume skip done note detail: {note_id}")
+                continue
+            pending_note_ids.append(note_id)
+            resume_manager.mark_detail_running(note_id, content_type="note")
+            task_list.append(self.get_note_info_task(note_id=note_id, semaphore=semaphore))
         video_details = await asyncio.gather(*task_list)
-        for note_item in video_details:
+        for note_id, note_item in zip(pending_note_ids, video_details):
             if note_item:
                 await weibo_store.update_weibo_note(note_item)
+                resume_manager.mark_detail_done(note_id, content_type="note")
+            else:
+                resume_manager.mark_detail_failed(note_id, content_type="note")
         await self.batch_get_notes_comments(config.WEIBO_SPECIFIED_ID_LIST)
 
     async def get_note_info_task(self, note_id: str, semaphore: asyncio.Semaphore) -> Optional[Dict]:
@@ -239,6 +271,9 @@ class WeiboCrawler(AbstractCrawler):
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for note_id in note_id_list:
+            if resume_manager.should_skip_comment(note_id):
+                utils.logger.info(f"[WeiboCrawler.batch_get_notes_comments] Resume skip done comments, note_id: {note_id}")
+                continue
             task = asyncio.create_task(self.get_note_comments(note_id, semaphore), name=note_id)
             task_list.append(task)
         await asyncio.gather(*task_list)
@@ -252,6 +287,7 @@ class WeiboCrawler(AbstractCrawler):
         """
         async with semaphore:
             try:
+                resume_manager.mark_comment_running(note_id, keyword=source_keyword_var.get(), content_type="note")
                 utils.logger.info(f"[WeiboCrawler.get_note_comments] begin get note_id: {note_id} comments ...")
 
                 # Sleep before fetching comments
@@ -264,9 +300,12 @@ class WeiboCrawler(AbstractCrawler):
                     callback=weibo_store.batch_update_weibo_note_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                resume_manager.mark_comment_done(note_id, keyword=source_keyword_var.get(), content_type="note")
             except DataFetchError as ex:
+                resume_manager.mark_comment_failed(note_id, keyword=source_keyword_var.get(), content_type="note")
                 utils.logger.error(f"[WeiboCrawler.get_note_comments] get note_id: {note_id} comment error: {ex}")
             except Exception as e:
+                resume_manager.mark_comment_failed(note_id, keyword=source_keyword_var.get(), content_type="note")
                 utils.logger.error(f"[WeiboCrawler.get_note_comments] may be been blocked, err:{e}")
 
     async def get_note_images(self, mblog: Dict):

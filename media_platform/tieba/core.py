@@ -38,6 +38,7 @@ from proxy.proxy_ip_pool import IpInfoModel, ProxyIpPool, create_ip_pool
 from store import tieba as tieba_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.resume_manager import resume_manager
 from var import crawler_type_var, source_keyword_var
 
 from .client import BaiduTieBaClient
@@ -171,7 +172,12 @@ class TieBaCrawler(AbstractCrawler):
                     utils.logger.info(f"[BaiduTieBaCrawler.search] Skip page {page}")
                     page += 1
                     continue
+                if resume_manager.is_page_done(keyword, page):
+                    utils.logger.info(f"[BaiduTieBaCrawler.search] Resume skip done page, keyword: {keyword}, page: {page}")
+                    page += 1
+                    continue
                 try:
+                    resume_manager.mark_page_running(keyword, page)
                     utils.logger.info(
                         f"[BaiduTieBaCrawler.search] search tieba keyword: {keyword}, page: {page}"
                     )
@@ -195,6 +201,7 @@ class TieBaCrawler(AbstractCrawler):
                     await self.get_specified_notes(
                         note_id_list=[note_detail.note_id for note_detail in notes_list]
                     )
+                    resume_manager.mark_page_done(keyword, page)
 
                     # Sleep after page navigation
                     sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
@@ -205,6 +212,7 @@ class TieBaCrawler(AbstractCrawler):
                     utils.logger.error(
                         f"[BaiduTieBaCrawler.search] Search keywords error, current page: {page}, current keyword: {keyword}, err: {ex}"
                     )
+                    resume_manager.mark_page_failed(keyword, page)
                     break
 
     async def get_specified_tieba_notes(self):
@@ -258,16 +266,26 @@ class TieBaCrawler(AbstractCrawler):
         if note_id_list is None:
             note_id_list = config.TIEBA_SPECIFIED_ID_LIST
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        pending_note_ids = []
+        for note_id in note_id_list:
+            resume_manager.upsert_item(note_id, keyword=source_keyword_var.get(), content_type="note")
+            if resume_manager.should_skip_detail(note_id) and resume_manager.should_skip_comment(note_id):
+                utils.logger.info(f"[BaiduTieBaCrawler.get_specified_notes] Resume skip done note: {note_id}")
+                continue
+            pending_note_ids.append(note_id)
         task_list = [
             self.get_note_detail_async_task(note_id=note_id, semaphore=semaphore)
-            for note_id in note_id_list
+            for note_id in pending_note_ids
         ]
         note_details = await asyncio.gather(*task_list)
         note_details_model: List[TiebaNote] = []
-        for note_detail in note_details:
+        for note_id, note_detail in zip(pending_note_ids, note_details):
             if note_detail is not None:
                 note_details_model.append(note_detail)
                 await tieba_store.update_tieba_note(note_detail)
+                resume_manager.mark_detail_done(note_detail.note_id, keyword=source_keyword_var.get(), content_type="note")
+            else:
+                resume_manager.mark_detail_failed(note_id, keyword=source_keyword_var.get(), content_type="note")
         await self.batch_get_note_comments(note_details_model)
 
     async def get_note_detail_async_task(
@@ -325,6 +343,9 @@ class TieBaCrawler(AbstractCrawler):
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for note_detail in note_detail_list:
+            if resume_manager.should_skip_comment(note_detail.note_id):
+                utils.logger.info(f"[BaiduTieBaCrawler.batch_get_note_comments] Resume skip done comments, note_id: {note_detail.note_id}")
+                continue
             task = asyncio.create_task(
                 self.get_comments_async_task(note_detail, semaphore),
                 name=note_detail.note_id,
@@ -348,17 +369,23 @@ class TieBaCrawler(AbstractCrawler):
             utils.logger.info(
                 f"[BaiduTieBaCrawler.get_comments] Begin get note id comments {note_detail.note_id}"
             )
+            resume_manager.mark_comment_running(note_detail.note_id, keyword=source_keyword_var.get(), content_type="note")
 
             # Sleep before fetching comments
             sleep_seconds = await utils.crawler_sleep(config.CRAWLER_COMMENT_SLEEP_SEC)
             utils.logger.info(f"[TieBaCrawler.get_comments_async_task] Sleeping for {sleep_seconds:.2f} seconds before fetching comments for note {note_detail.note_id}")
 
-            await self.tieba_client.get_note_all_comments(
-                note_detail=note_detail,
-                crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
-                callback=tieba_store.batch_update_tieba_note_comments,
-                max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
-            )
+            try:
+                await self.tieba_client.get_note_all_comments(
+                    note_detail=note_detail,
+                    crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
+                    callback=tieba_store.batch_update_tieba_note_comments,
+                    max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                )
+                resume_manager.mark_comment_done(note_detail.note_id, keyword=source_keyword_var.get(), content_type="note")
+            except Exception:
+                resume_manager.mark_comment_failed(note_detail.note_id, keyword=source_keyword_var.get(), content_type="note")
+                raise
 
     async def get_creators_and_notes(self) -> None:
         """

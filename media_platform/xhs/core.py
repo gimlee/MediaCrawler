@@ -39,6 +39,7 @@ from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import xhs as xhs_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.resume_manager import resume_manager
 from var import crawler_type_var, source_keyword_var
 
 from .client import XiaoHongShuClient
@@ -143,8 +144,13 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Skip page {page}")
                     page += 1
                     continue
+                if resume_manager.is_page_done(keyword, page):
+                    utils.logger.info(f"[XiaoHongShuCrawler.search] Resume skip done page, keyword: {keyword}, page: {page}")
+                    page += 1
+                    continue
 
                 try:
+                    resume_manager.mark_page_running(keyword, page)
                     utils.logger.info(f"[XiaoHongShuCrawler.search] search Xiaohongshu keyword: {keyword}, page: {page}")
                     note_ids: List[str] = []
                     xsec_tokens: List[str] = []
@@ -159,29 +165,53 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         utils.logger.info("[XiaoHongShuCrawler.search] No more content!")
                         break
                     semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-                    task_list = [
-                        self.get_note_detail_async_task(
-                            note_id=post_item.get("id"),
-                            xsec_source=post_item.get("xsec_source"),
-                            xsec_token=post_item.get("xsec_token"),
-                            semaphore=semaphore,
-                        ) for post_item in notes_res.get("items", {}) if post_item.get("model_type") not in ("rec_query", "hot_query")
+                    post_items = [
+                        post_item for post_item in notes_res.get("items", {})
+                        if post_item.get("model_type") not in ("rec_query", "hot_query")
                     ]
+                    task_items = []
+                    task_list = []
+                    for post_item in post_items:
+                        note_id = post_item.get("id")
+                        if resume_manager.should_skip_detail(note_id):
+                            continue
+                        task_items.append(post_item)
+                        resume_manager.mark_detail_running(note_id, keyword=keyword, content_type="note")
+                        task_list.append(
+                            self.get_note_detail_async_task(
+                                note_id=post_item.get("id"),
+                                xsec_source=post_item.get("xsec_source"),
+                                xsec_token=post_item.get("xsec_token"),
+                                semaphore=semaphore,
+                            )
+                        )
                     note_details = await asyncio.gather(*task_list)
-                    for note_detail in note_details:
+                    for post_item in post_items:
+                        note_id = post_item.get("id")
+                        resume_manager.upsert_item(note_id, keyword=keyword, content_type="note")
+                        if resume_manager.should_skip_detail(note_id):
+                            note_ids.append(note_id)
+                            xsec_tokens.append(post_item.get("xsec_token"))
+                    for post_item, note_detail in zip(task_items, note_details):
+                        note_id = post_item.get("id")
                         if note_detail:
                             await xhs_store.update_xhs_note(note_detail)
                             await self.get_notice_media(note_detail)
+                            resume_manager.mark_detail_done(note_detail.get("note_id") or note_id, keyword=keyword, content_type="note")
                             note_ids.append(note_detail.get("note_id"))
                             xsec_tokens.append(note_detail.get("xsec_token"))
+                        else:
+                            resume_manager.mark_detail_failed(note_id, keyword=keyword, content_type="note")
                     page += 1
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Note details: {note_details}")
                     await self.batch_get_note_comments(note_ids, xsec_tokens)
+                    resume_manager.mark_page_done(keyword, page - 1)
 
                     # Sleep after each page navigation
                     sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
                 except DataFetchError:
+                    resume_manager.mark_page_failed(keyword, page)
                     utils.logger.error("[XiaoHongShuCrawler.search] Get note detail error")
                     break
 
@@ -249,9 +279,15 @@ class XiaoHongShuCrawler(AbstractCrawler):
         Note: Must specify note_id, xsec_source, xsec_token
         """
         get_note_detail_task_list = []
+        task_note_infos = []
         for full_note_url in config.XHS_SPECIFIED_NOTE_URL_LIST:
             note_url_info: NoteUrlInfo = parse_note_info_from_note_url(full_note_url)
             utils.logger.info(f"[XiaoHongShuCrawler.get_specified_notes] Parse note url info: {note_url_info}")
+            resume_manager.upsert_item(note_url_info.note_id, content_type="note")
+            if resume_manager.should_skip_detail(note_url_info.note_id):
+                utils.logger.info(f"[XiaoHongShuCrawler.get_specified_notes] Resume skip done note detail: {note_url_info.note_id}")
+                continue
+            task_note_infos.append(note_url_info)
             crawler_task = self.get_note_detail_async_task(
                 note_id=note_url_info.note_id,
                 xsec_source=note_url_info.xsec_source,
@@ -262,13 +298,18 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
         need_get_comment_note_ids = []
         xsec_tokens = []
+        for full_note_url in config.XHS_SPECIFIED_NOTE_URL_LIST:
+            note_url_info: NoteUrlInfo = parse_note_info_from_note_url(full_note_url)
+            need_get_comment_note_ids.append(note_url_info.note_id)
+            xsec_tokens.append(note_url_info.xsec_token)
         note_details = await asyncio.gather(*get_note_detail_task_list)
-        for note_detail in note_details:
+        for note_url_info, note_detail in zip(task_note_infos, note_details):
             if note_detail:
-                need_get_comment_note_ids.append(note_detail.get("note_id", ""))
-                xsec_tokens.append(note_detail.get("xsec_token", ""))
                 await xhs_store.update_xhs_note(note_detail)
                 await self.get_notice_media(note_detail)
+                resume_manager.mark_detail_done(note_detail.get("note_id") or note_url_info.note_id, content_type="note")
+            else:
+                resume_manager.mark_detail_failed(note_url_info.note_id, content_type="note")
         await self.batch_get_note_comments(need_get_comment_note_ids, xsec_tokens)
 
     async def get_note_detail_async_task(
@@ -332,6 +373,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for index, note_id in enumerate(note_list):
+            if resume_manager.should_skip_comment(note_id):
+                utils.logger.info(f"[XiaoHongShuCrawler.batch_get_note_comments] Resume skip done comments, note_id: {note_id}")
+                continue
             task = asyncio.create_task(
                 self.get_comments(note_id=note_id, xsec_token=xsec_tokens[index], semaphore=semaphore),
                 name=note_id,
@@ -343,15 +387,21 @@ class XiaoHongShuCrawler(AbstractCrawler):
         """Get note comments with keyword filtering and quantity limitation"""
         async with semaphore:
             utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Begin get note id comments {note_id}")
+            resume_manager.mark_comment_running(note_id, keyword=source_keyword_var.get(), content_type="note")
             # Use fixed crawling interval
             crawl_interval = config.CRAWLER_COMMENT_SLEEP_SEC
-            await self.xhs_client.get_note_all_comments(
-                note_id=note_id,
-                xsec_token=xsec_token,
-                crawl_interval=crawl_interval,
-                callback=xhs_store.batch_update_xhs_note_comments,
-                max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
-            )
+            try:
+                await self.xhs_client.get_note_all_comments(
+                    note_id=note_id,
+                    xsec_token=xsec_token,
+                    crawl_interval=crawl_interval,
+                    callback=xhs_store.batch_update_xhs_note_comments,
+                    max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                )
+                resume_manager.mark_comment_done(note_id, keyword=source_keyword_var.get(), content_type="note")
+            except Exception:
+                resume_manager.mark_comment_failed(note_id, keyword=source_keyword_var.get(), content_type="note")
+                raise
 
             # Sleep after fetching comments
             sleep_seconds = await utils.crawler_sleep(crawl_interval)

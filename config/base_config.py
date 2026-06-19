@@ -158,6 +158,24 @@ REQUEST_RETRY_TIMES = 3
 # Stop the crawler when total request failures exceed this value.
 REQUEST_FAILED_LIMIT = 10
 
+# Whether to enable resumable crawling.
+ENABLE_RESUME = True
+
+# Local directory used to save resumable crawling state.
+RESUME_STATE_DIR = "data/resume"
+
+# Optional custom resume task id. Empty means auto-generate from current command config.
+RESUME_TASK_ID = ""
+
+# Clear existing resume state for the current resume task before crawling.
+RESET_RESUME_STATE = False
+
+# Retry items previously marked as failed when the same task resumes.
+RESUME_RETRY_FAILED = True
+
+# Mark a page/item as failed when its failure count reaches this value.
+RESUME_ITEM_MAX_FAILED_TIMES = 3
+
 # 是否禁用 SSL 证书验证。仅在使用企业代理、Burp Suite、mitmproxy 等会注入自签名证书的中间人代理时设为 True。
 # 警告：禁用 SSL 验证将使所有流量暴露于中间人攻击风险，请勿在生产环境中开启。
 DISABLE_SSL_VERIFY = False

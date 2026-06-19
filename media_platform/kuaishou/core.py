@@ -40,6 +40,7 @@ from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import kuaishou as kuaishou_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.resume_manager import resume_manager
 from var import comment_tasks_var, crawler_type_var, source_keyword_var
 
 from .client import KuaiShouClient
@@ -147,6 +148,11 @@ class KuaishouCrawler(AbstractCrawler):
                     utils.logger.info(f"[KuaishouCrawler.search] Skip page: {page}")
                     page += 1
                     continue
+                if resume_manager.is_page_done(keyword, page):
+                    utils.logger.info(f"[KuaishouCrawler.search] Resume skip done page, keyword: {keyword}, page: {page}")
+                    page += 1
+                    continue
+                resume_manager.mark_page_running(keyword, page)
                 utils.logger.info(
                     f"[KuaishouCrawler.search] search kuaishou keyword: {keyword}, page: {page}"
                 )
@@ -160,6 +166,7 @@ class KuaishouCrawler(AbstractCrawler):
                     utils.logger.error(
                         f"[KuaishouCrawler.search] search info by keyword:{keyword} not found data"
                     )
+                    resume_manager.mark_page_failed(keyword, page)
                     break
 
                 vision_search_photo: Dict = videos_res.get("visionSearchPhoto")
@@ -167,11 +174,25 @@ class KuaishouCrawler(AbstractCrawler):
                     utils.logger.error(
                         f"[KuaishouCrawler.search] search info by keyword:{keyword} not found data "
                     )
+                    resume_manager.mark_page_failed(keyword, page)
                     break
                 search_session_id = vision_search_photo.get("searchSessionId", "")
                 for video_detail in vision_search_photo.get("feeds"):
-                    video_id_list.append(video_detail.get("photo", {}).get("id"))
-                    await kuaishou_store.update_kuaishou_video(video_item=video_detail)
+                    video_id = video_detail.get("photo", {}).get("id")
+                    if not video_id:
+                        continue
+                    resume_manager.upsert_item(video_id, keyword=keyword, content_type="video")
+                    video_id_list.append(video_id)
+                    if resume_manager.should_skip_detail(video_id):
+                        utils.logger.info(f"[KuaishouCrawler.search] Resume skip done video detail: {video_id}")
+                        continue
+                    try:
+                        resume_manager.mark_detail_running(video_id, keyword=keyword, content_type="video")
+                        await kuaishou_store.update_kuaishou_video(video_item=video_detail)
+                        resume_manager.mark_detail_done(video_id, keyword=keyword, content_type="video")
+                    except Exception:
+                        resume_manager.mark_detail_failed(video_id, keyword=keyword, content_type="video")
+                        raise
 
                 # batch fetch video comments
                 page += 1
@@ -181,6 +202,7 @@ class KuaishouCrawler(AbstractCrawler):
                 utils.logger.info(f"[KuaishouCrawler.search] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
 
                 await self.batch_get_video_comments(video_id_list)
+                resume_manager.mark_page_done(keyword, page - 1)
 
     async def get_specified_videos(self):
         """Get the information and comments of the specified post"""
@@ -196,14 +218,23 @@ class KuaishouCrawler(AbstractCrawler):
                 continue
 
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list = [
-            self.get_video_info_task(video_id=video_id, semaphore=semaphore)
-            for video_id in video_ids
-        ]
+        pending_video_ids = []
+        task_list = []
+        for video_id in video_ids:
+            resume_manager.upsert_item(video_id, content_type="video")
+            if resume_manager.should_skip_detail(video_id):
+                utils.logger.info(f"[KuaishouCrawler.get_specified_videos] Resume skip done video detail: {video_id}")
+                continue
+            pending_video_ids.append(video_id)
+            resume_manager.mark_detail_running(video_id, content_type="video")
+            task_list.append(self.get_video_info_task(video_id=video_id, semaphore=semaphore))
         video_details = await asyncio.gather(*task_list)
-        for video_detail in video_details:
+        for video_id, video_detail in zip(pending_video_ids, video_details):
             if video_detail is not None:
                 await kuaishou_store.update_kuaishou_video(video_detail)
+                resume_manager.mark_detail_done(video_id, content_type="video")
+            else:
+                resume_manager.mark_detail_failed(video_id, content_type="video")
         await self.batch_get_video_comments(video_ids)
 
     async def get_video_info_task(
@@ -251,6 +282,9 @@ class KuaishouCrawler(AbstractCrawler):
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for video_id in video_id_list:
+            if resume_manager.should_skip_comment(video_id):
+                utils.logger.info(f"[KuaishouCrawler.batch_get_video_comments] Resume skip done comments, video_id: {video_id}")
+                continue
             task = asyncio.create_task(
                 self.get_comments(video_id, semaphore), name=video_id
             )
@@ -268,6 +302,7 @@ class KuaishouCrawler(AbstractCrawler):
         """
         async with semaphore:
             try:
+                resume_manager.mark_comment_running(video_id, keyword=source_keyword_var.get(), content_type="video")
                 utils.logger.info(
                     f"[KuaishouCrawler.get_comments] begin get video_id: {video_id} comments ..."
                 )
@@ -282,11 +317,14 @@ class KuaishouCrawler(AbstractCrawler):
                     callback=kuaishou_store.batch_update_ks_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                resume_manager.mark_comment_done(video_id, keyword=source_keyword_var.get(), content_type="video")
             except DataFetchError as ex:
+                resume_manager.mark_comment_failed(video_id, keyword=source_keyword_var.get(), content_type="video")
                 utils.logger.error(
                     f"[KuaishouCrawler.get_comments] get video_id: {video_id} comment error: {ex}"
                 )
             except Exception as e:
+                resume_manager.mark_comment_failed(video_id, keyword=source_keyword_var.get(), content_type="video")
                 utils.logger.error(
                     f"[KuaishouCrawler.get_comments] may be been blocked, err:{e}"
                 )

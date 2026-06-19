@@ -37,6 +37,7 @@ from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import douyin as douyin_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.resume_manager import resume_manager
 from var import crawler_type_var, source_keyword_var
 
 from .client import DouYinClient
@@ -141,7 +142,12 @@ class DouYinCrawler(AbstractCrawler):
                     utils.logger.info(f"[DouYinCrawler.search] Skip {page}")
                     page += 1
                     continue
+                if resume_manager.is_page_done(keyword, page):
+                    utils.logger.info(f"[DouYinCrawler.search] Resume skip done page, keyword: {keyword}, page: {page}")
+                    page += 1
+                    continue
                 try:
+                    resume_manager.mark_page_running(keyword, page)
                     utils.logger.info(f"[DouYinCrawler.search] search douyin keyword: {keyword}, page: {page}")
                     posts_res = await self.dy_client.search_info_by_keyword(
                         keyword=keyword,
@@ -153,6 +159,7 @@ class DouYinCrawler(AbstractCrawler):
                         utils.logger.info(f"[DouYinCrawler.search] search douyin keyword: {keyword}, page: {page} is empty,{posts_res.get('data')}`")
                         break
                 except DataFetchError:
+                    resume_manager.mark_page_failed(keyword, page)
                     utils.logger.error(f"[DouYinCrawler.search] search douyin keyword: {keyword} failed")
                     break
 
@@ -167,13 +174,27 @@ class DouYinCrawler(AbstractCrawler):
                         aweme_info: Dict = (post_item.get("aweme_info") or post_item.get("aweme_mix_info", {}).get("mix_items")[0])
                     except TypeError:
                         continue
-                    aweme_list.append(aweme_info.get("aweme_id", ""))
-                    page_aweme_list.append(aweme_info.get("aweme_id", ""))
-                    await douyin_store.update_douyin_aweme(aweme_item=aweme_info)
-                    await self.get_aweme_media(aweme_item=aweme_info)
+                    aweme_id = aweme_info.get("aweme_id", "")
+                    if not aweme_id:
+                        continue
+                    resume_manager.upsert_item(aweme_id, keyword=keyword, content_type="aweme")
+                    aweme_list.append(aweme_id)
+                    page_aweme_list.append(aweme_id)
+                    if resume_manager.should_skip_detail(aweme_id):
+                        utils.logger.info(f"[DouYinCrawler.search] Resume skip done aweme detail: {aweme_id}")
+                        continue
+                    try:
+                        resume_manager.mark_detail_running(aweme_id, keyword=keyword, content_type="aweme")
+                        await douyin_store.update_douyin_aweme(aweme_item=aweme_info)
+                        await self.get_aweme_media(aweme_item=aweme_info)
+                        resume_manager.mark_detail_done(aweme_id, keyword=keyword, content_type="aweme")
+                    except Exception:
+                        resume_manager.mark_detail_failed(aweme_id, keyword=keyword, content_type="aweme")
+                        raise
                 
                 # Batch get note comments for the current page
                 await self.batch_get_note_comments(page_aweme_list)
+                resume_manager.mark_page_done(keyword, page - 1)
 
                 # Sleep after each page navigation
                 sleep_seconds = await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
@@ -207,12 +228,24 @@ class DouYinCrawler(AbstractCrawler):
                 continue
 
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list = [self.get_aweme_detail(aweme_id=aweme_id, semaphore=semaphore) for aweme_id in aweme_id_list]
+        pending_aweme_ids = []
+        task_list = []
+        for aweme_id in aweme_id_list:
+            resume_manager.upsert_item(aweme_id, content_type="aweme")
+            if resume_manager.should_skip_detail(aweme_id):
+                utils.logger.info(f"[DouYinCrawler.get_specified_awemes] Resume skip done aweme detail: {aweme_id}")
+                continue
+            pending_aweme_ids.append(aweme_id)
+            resume_manager.mark_detail_running(aweme_id, content_type="aweme")
+            task_list.append(self.get_aweme_detail(aweme_id=aweme_id, semaphore=semaphore))
         aweme_details = await asyncio.gather(*task_list)
-        for aweme_detail in aweme_details:
+        for aweme_id, aweme_detail in zip(pending_aweme_ids, aweme_details):
             if aweme_detail is not None:
                 await douyin_store.update_douyin_aweme(aweme_item=aweme_detail)
                 await self.get_aweme_media(aweme_item=aweme_detail)
+                resume_manager.mark_detail_done(aweme_id, content_type="aweme")
+            else:
+                resume_manager.mark_detail_failed(aweme_id, content_type="aweme")
         await self.batch_get_note_comments(aweme_id_list)
 
     async def get_aweme_detail(self, aweme_id: str, semaphore: asyncio.Semaphore) -> Any:
@@ -242,6 +275,9 @@ class DouYinCrawler(AbstractCrawler):
         task_list: List[Task] = []
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         for aweme_id in aweme_list:
+            if resume_manager.should_skip_comment(aweme_id):
+                utils.logger.info(f"[DouYinCrawler.batch_get_note_comments] Resume skip done comments, aweme_id: {aweme_id}")
+                continue
             task = asyncio.create_task(self.get_comments(aweme_id, semaphore), name=aweme_id)
             task_list.append(task)
         if len(task_list) > 0:
@@ -250,6 +286,7 @@ class DouYinCrawler(AbstractCrawler):
     async def get_comments(self, aweme_id: str, semaphore: asyncio.Semaphore) -> None:
         async with semaphore:
             try:
+                resume_manager.mark_comment_running(aweme_id, keyword=source_keyword_var.get(), content_type="aweme")
                 # Pass the list of keywords to the get_aweme_all_comments method
                 # Use fixed crawling interval
                 crawl_interval = config.CRAWLER_COMMENT_SLEEP_SEC
@@ -264,7 +301,9 @@ class DouYinCrawler(AbstractCrawler):
                 sleep_seconds = await utils.crawler_sleep(crawl_interval)
                 utils.logger.info(f"[DouYinCrawler.get_comments] Sleeping for {crawl_interval} seconds after fetching comments for aweme {aweme_id}")
                 utils.logger.info(f"[DouYinCrawler.get_comments] aweme_id: {aweme_id} comments have all been obtained and filtered ...")
+                resume_manager.mark_comment_done(aweme_id, keyword=source_keyword_var.get(), content_type="aweme")
             except DataFetchError as e:
+                resume_manager.mark_comment_failed(aweme_id, keyword=source_keyword_var.get(), content_type="aweme")
                 utils.logger.error(f"[DouYinCrawler.get_comments] aweme_id: {aweme_id} get comments failed, error: {e}")
 
     async def get_creators_and_videos(self) -> None:

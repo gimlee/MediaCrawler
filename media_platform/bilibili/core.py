@@ -46,6 +46,7 @@ from store import bilibili as bilibili_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
 from tools.httpx_util import RequestFailureLimitExceeded
+from tools.resume_manager import resume_manager
 from var import crawler_type_var, source_keyword_var
 
 from .client import BilibiliClient
@@ -200,7 +201,12 @@ class BilibiliCrawler(AbstractCrawler):
                     utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Skip page: {page}")
                     page += 1
                     continue
+                if resume_manager.is_page_done(keyword, page):
+                    utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Resume skip done page, keyword: {keyword}, page: {page}")
+                    page += 1
+                    continue
 
+                resume_manager.mark_page_running(keyword, page)
                 utils.logger.info(f"[BilibiliCrawler.search_by_keywords] search bilibili keyword: {keyword}, page: {page}")
                 video_id_list: List[str] = []
                 videos_res = await self.bili_client.search_video_by_keyword(
@@ -219,17 +225,32 @@ class BilibiliCrawler(AbstractCrawler):
 
                 semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
                 task_list = []
+                task_items = []
                 try:
-                    task_list = [self.get_video_info_task(aid=video_item.get("aid"), bvid="", semaphore=semaphore) for video_item in video_list]
+                    for video_item in video_list:
+                        aid = video_item.get("aid")
+                        if not aid:
+                            continue
+                        resume_manager.upsert_item(aid, keyword=keyword, content_type="video")
+                        video_id_list.append(aid)
+                        if resume_manager.should_skip_detail(aid):
+                            utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Resume skip done video detail: {aid}")
+                            continue
+                        task_items.append(video_item)
+                        resume_manager.mark_detail_running(aid, keyword=keyword, content_type="video")
+                        task_list.append(self.get_video_info_task(aid=aid, bvid="", semaphore=semaphore))
                 except Exception as e:
                     utils.logger.warning(f"[BilibiliCrawler.search_by_keywords] error in the task list. The video for this page will not be included. {e}")
                 video_items = await asyncio.gather(*task_list)
-                for video_item in video_items:
+                for source_video_item, video_item in zip(task_items, video_items):
+                    aid = source_video_item.get("aid")
                     if video_item:
-                        video_id_list.append(video_item.get("View").get("aid"))
                         await bilibili_store.update_bilibili_video(video_item)
                         await bilibili_store.update_up_info(video_item)
                         await self.get_bilibili_video(video_item, semaphore)
+                        resume_manager.mark_detail_done(video_item.get("View", {}).get("aid") or aid, keyword=keyword, content_type="video")
+                    else:
+                        resume_manager.mark_detail_failed(aid, keyword=keyword, content_type="video")
                 page += 1
 
                 # Sleep after page navigation
@@ -237,6 +258,7 @@ class BilibiliCrawler(AbstractCrawler):
                 utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Sleeping for {sleep_seconds:.2f} seconds after page {page-1}")
 
                 await self.batch_get_video_comments(video_id_list)
+                resume_manager.mark_page_done(keyword, page - 1)
 
     async def search_by_keywords_in_time_range(self, daily_limit: bool):
         """
@@ -337,6 +359,9 @@ class BilibiliCrawler(AbstractCrawler):
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for video_id in video_id_list:
+            if resume_manager.should_skip_comment(video_id):
+                utils.logger.info(f"[BilibiliCrawler.batch_get_video_comments] Resume skip done comments, video_id: {video_id}")
+                continue
             task = asyncio.create_task(self.get_comments(video_id, semaphore), name=video_id)
             task_list.append(task)
         await asyncio.gather(*task_list)
@@ -350,6 +375,7 @@ class BilibiliCrawler(AbstractCrawler):
         """
         async with semaphore:
             try:
+                resume_manager.mark_comment_running(video_id, keyword=source_keyword_var.get(), content_type="video")
                 utils.logger.info(f"[BilibiliCrawler.get_comments] begin get video_id: {video_id} comments ...")
                 sleep_seconds = await utils.crawler_sleep(config.CRAWLER_COMMENT_SLEEP_SEC)
                 utils.logger.info(f"[BilibiliCrawler.get_comments] Sleeping for {sleep_seconds:.2f} seconds after fetching comments for video {video_id}")
@@ -360,12 +386,15 @@ class BilibiliCrawler(AbstractCrawler):
                     callback=bilibili_store.batch_update_bilibili_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                resume_manager.mark_comment_done(video_id, keyword=source_keyword_var.get(), content_type="video")
 
             except DataFetchError as ex:
+                resume_manager.mark_comment_failed(video_id, keyword=source_keyword_var.get(), content_type="video")
                 utils.logger.error(f"[BilibiliCrawler.get_comments] get video_id: {video_id} comment error: {ex}")
             except RequestFailureLimitExceeded:
                 raise
             except Exception as e:
+                resume_manager.mark_comment_failed(video_id, keyword=source_keyword_var.get(), content_type="video")
                 utils.logger.error(f"[BilibiliCrawler.get_comments] may be been blocked, err:{e}")
 
     async def get_creator_videos(self, creator_id: int):
@@ -397,6 +426,7 @@ class BilibiliCrawler(AbstractCrawler):
             try:
                 video_info = parse_video_info_from_url(video_url)
                 bvids_list.append(video_info.video_id)
+                resume_manager.upsert_item(video_info.video_id, content_type="video")
                 utils.logger.info(f"[BilibiliCrawler.get_specified_videos] Parsed video ID: {video_info.video_id} from {video_url}")
             except ValueError as e:
                 utils.logger.error(f"[BilibiliCrawler.get_specified_videos] Failed to parse video URL: {e}")
@@ -412,6 +442,7 @@ class BilibiliCrawler(AbstractCrawler):
                 video_aid: str = video_item_view.get("aid")
                 if video_aid:
                     video_aids_list.append(video_aid)
+                    resume_manager.mark_detail_done(video_aid, content_type="video")
                 await bilibili_store.update_bilibili_video(video_detail)
                 await bilibili_store.update_up_info(video_detail)
                 await self.get_bilibili_video(video_detail, semaphore)
