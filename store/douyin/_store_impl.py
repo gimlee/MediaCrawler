@@ -97,7 +97,13 @@ class DouyinDbStoreImplement(AbstractStore):
         Args:
             content_item: content item dict
         """
+        # asyncpg (PostgreSQL) is strict about types and won't coerce str -> BIGINT,
+        # so normalize the BigInteger column values in the dict itself before building
+        # the ORM object (SQLite/MySQL drivers coerce automatically).
         aweme_id = int(content_item.get("aweme_id"))
+        content_item["aweme_id"] = aweme_id
+        if content_item.get("create_time") is not None:
+            content_item["create_time"] = int(content_item["create_time"])
         async with get_session() as session:
             result = await session.execute(select(DouyinAweme).where(DouyinAweme.aweme_id == aweme_id))
             aweme_detail = result.scalar_one_or_none()
@@ -119,6 +125,10 @@ class DouyinDbStoreImplement(AbstractStore):
             comment_item: comment item dict
         """
         comment_id = int(comment_item.get("comment_id"))
+        comment_item["comment_id"] = comment_id
+        comment_item["aweme_id"] = int(comment_item.get("aweme_id"))
+        if comment_item.get("create_time") is not None:
+            comment_item["create_time"] = int(comment_item["create_time"])
         async with get_session() as session:
             result = await session.execute(select(DouyinAwemeComment).where(DouyinAwemeComment.comment_id == comment_id))
             comment_detail = result.scalar_one_or_none()

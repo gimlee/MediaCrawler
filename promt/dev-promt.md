@@ -37,5 +37,5 @@ CRAWLER_MAX_SLEEP_SEC = [10, 30]
 
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres
-uv run main.py --platform wb --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform tieba --lt qrcode --type search --save_data_option postgres
+uv run main.py --platform wb --lt qrcode --type search --save_data_option postgres
