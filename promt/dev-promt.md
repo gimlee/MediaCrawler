@@ -39,3 +39,5 @@ uv run main.py --platform dy --lt qrcode --type search --save_data_option postgr
 uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform tieba --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform wb --lt qrcode --type search --save_data_option postgres
+uv run main.py --platform zhihu --lt qrcode --type search --save_data_option postgres
+uv run main.py --platform bili --lt qrcode --type search --save_data_option postgres
