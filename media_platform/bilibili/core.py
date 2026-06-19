@@ -45,6 +45,7 @@ from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import bilibili as bilibili_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.httpx_util import RequestFailureLimitExceeded
 from var import crawler_type_var, source_keyword_var
 
 from .client import BilibiliClient
@@ -362,10 +363,10 @@ class BilibiliCrawler(AbstractCrawler):
 
             except DataFetchError as ex:
                 utils.logger.error(f"[BilibiliCrawler.get_comments] get video_id: {video_id} comment error: {ex}")
+            except RequestFailureLimitExceeded:
+                raise
             except Exception as e:
                 utils.logger.error(f"[BilibiliCrawler.get_comments] may be been blocked, err:{e}")
-                # Propagate the exception to be caught by the main loop
-                raise
 
     async def get_creator_videos(self, creator_id: int):
         """

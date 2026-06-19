@@ -35,6 +35,23 @@ CRAWLER_MAX_SLEEP_SEC = [10, 30]
 该配置只对知乎平台生效。
 
 
+# P4
+执行
+uv run main.py --platform zhihu --lt qrcode --type search --save_data_option postgres
+报错
+
+# P5
+当前获取知乎问题下多个回答的时候，你有进去问题页面，去获取多个回答吗？还是说只是获取到搜索的结果，默认只有一个回答，然后只是去尝试去或更多回答，不一定能够获取到？
+
+# P6
+![alt text](image-1.png)
+修复该问题，网络超时不要中断程序。
+当前的请求超时时间是多少？如果没有配置的地方，请增加配置，并默认设置45秒。
+添加重试次数，默认3次（可以配置）
+如果只是该条内容失败超过了3次，就跳过，记下失败次数。
+如果失败次数（请求其他内容）超过10次(可以配置)，终止程序。
+
+
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform tieba --lt qrcode --type search --save_data_option postgres

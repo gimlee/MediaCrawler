@@ -239,12 +239,9 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         """
         uri = f"/api/v4/questions/{question_id}/answers"
         params = {
-            "include":
-            "data[*].is_normal,admin_closed_comment,reward_info,is_collapsed,annotation_action,annotation_detail,collapse_reason,collapsed_by,suggest_edit,comment_count,can_comment,content,editable_content,attachment,voteup_count,created_time,updated_time,review_info,excerpt,paid_info,reaction_instruction,is_labeled,label_info,relationship.is_authorized,voting,is_author,is_thanked,is_nothelp;data[*].author.badge[?(type=best_answerer)].topics;data[*].author.vip_info;data[*].question.has_publishing_draft,relationship",
             "offset": offset,
             "limit": limit,
             "platform": "desktop",
-            "sort_by": "default",
         }
         return await self.get(uri, params)
 

@@ -280,7 +280,7 @@ class ZhihuCrawler(AbstractCrawler):
                 for answer in answers:
                     if answer.content_id:
                         expanded_contents[answer.content_id] = answer
-            except DataFetchError as e:
+            except Exception as e:
                 utils.logger.warning(
                     f"[ZhihuCrawler.expand_question_answers] Failed to fetch answers for question {content.question_id}: {e}"
                 )

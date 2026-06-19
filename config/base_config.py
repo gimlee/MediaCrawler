@@ -140,6 +140,15 @@ FONT_PATH = "./docs/STZHONGS.TTF"
 # Crawl interval. Supports fixed seconds, e.g. 10, or random range, e.g. [10, 30].
 CRAWLER_MAX_SLEEP_SEC = [10, 30]
 
+# HTTP request timeout seconds.
+REQUEST_TIMEOUT = 45
+
+# HTTP request retry attempts for transient network errors.
+REQUEST_RETRY_TIMES = 3
+
+# Stop the crawler when total request failures exceed this value.
+REQUEST_FAILED_LIMIT = 10
+
 # 是否禁用 SSL 证书验证。仅在使用企业代理、Burp Suite、mitmproxy 等会注入自签名证书的中间人代理时设为 True。
 # 警告：禁用 SSL 验证将使所有流量暴露于中间人攻击风险，请勿在生产环境中开启。
 DISABLE_SSL_VERIFY = False

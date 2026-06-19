@@ -23,13 +23,12 @@
 # @Desc    : bilibili request client
 import asyncio
 import json
-import random
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlencode
 
 import httpx
 from playwright.async_api import BrowserContext, Page
-from tools.httpx_util import make_async_client
+from tools.httpx_util import make_async_client, request_with_retry
 
 import config
 from base.base_crawler import AbstractApiClient
@@ -48,7 +47,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
 
     def __init__(
         self,
-        timeout=60,  # For media crawling, Bilibili long videos need a longer timeout
+        timeout=None,
         proxy=None,
         *,
         headers: Dict[str, str],
@@ -57,7 +56,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
     ):
         self.proxy = proxy
-        self.timeout = timeout
+        self.timeout = timeout or getattr(config, "REQUEST_TIMEOUT", 45)
         self.headers = headers
         self._host = "https://api.bilibili.com"
         self.cookie_urls = ["https://www.bilibili.com"]
@@ -71,7 +70,10 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         await self._refresh_proxy_if_expired()
 
         async with make_async_client(proxy=self.proxy) as client:
-            response = await client.request(method, url, timeout=self.timeout, **kwargs)
+            try:
+                response = await request_with_retry(client, method, url, timeout=self.timeout, **kwargs)
+            except httpx.RequestError as exc:
+                raise DataFetchError(f"{exc.__class__.__name__}: {exc}") from exc
         try:
             data: Dict = response.json()
         except json.JSONDecodeError:
@@ -229,7 +231,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         # Follow CDN 302 redirects and treat any 2xx as success (some endpoints return 206)
         async with make_async_client(proxy=self.proxy, follow_redirects=True) as client:
             try:
-                response = await client.request("GET", url, timeout=self.timeout, headers=self.headers)
+                response = await request_with_retry(client, "GET", url, timeout=self.timeout, headers=self.headers)
                 response.raise_for_status()
                 if 200 <= response.status_code < 300:
                     return response.content
@@ -278,22 +280,14 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         result = []
         is_end = False
         next_page = 0
-        max_retries = 3
         while not is_end and len(result) < max_count:
-            comments_res = None
-            for attempt in range(max_retries):
-                try:
-                    comments_res = await self.get_video_comments(video_id, CommentOrderType.DEFAULT, next_page)
-                    break  # Success
-                except DataFetchError as e:
-                    if attempt < max_retries - 1:
-                        delay = 5 * (2**attempt) + random.uniform(0, 1)
-                        utils.logger.warning(f"[BilibiliClient.get_video_all_comments] Retrying video_id {video_id} in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
-                        await asyncio.sleep(delay)
-                    else:
-                        utils.logger.error(f"[BilibiliClient.get_video_all_comments] Max retries reached for video_id: {video_id}. Skipping comments. Error: {e}")
-                        is_end = True
-                        break
+            try:
+                comments_res = await self.get_video_comments(video_id, CommentOrderType.DEFAULT, next_page)
+            except DataFetchError as e:
+                utils.logger.error(
+                    f"[BilibiliClient.get_video_all_comments] Skip video_id {video_id} comments after request retries. Error: {e}"
+                )
+                break
             if not comments_res:
                 break
 
