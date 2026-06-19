@@ -69,7 +69,7 @@ mongodb_config = {
 }
 
 # postgres config
-POSTGRES_DB_PWD = os.getenv("POSTGRES_DB_PWD", "123456")
+POSTGRES_DB_PWD = os.getenv("POSTGRES_DB_PWD", "postgres")
 POSTGRES_DB_USER = os.getenv("POSTGRES_DB_USER", "postgres")
 POSTGRES_DB_HOST = os.getenv("POSTGRES_DB_HOST", "localhost")
 POSTGRES_DB_PORT = os.getenv("POSTGRES_DB_PORT", 5432)

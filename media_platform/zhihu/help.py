@@ -34,6 +34,12 @@ from tools.crawler_util import extract_text_from_html
 ZHIHU_SGIN_JS = None
 
 
+def _to_str(value, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value)
+
+
 def sign(url: str, cookies: str) -> Dict:
     """
     zhihu sign algorithm
@@ -106,10 +112,10 @@ class ZhihuExtractor:
         Returns:
         """
         res = ZhihuContent()
-        res.content_id = answer.get("id")
+        res.content_id = _to_str(answer.get("id"))
         res.content_type = answer.get("type")
         res.content_text = extract_text_from_html(answer.get("content", ""))
-        res.question_id = answer.get("question").get("id")
+        res.question_id = _to_str((answer.get("question") or {}).get("id"))
         res.content_url = f"{zhihu_constant.ZHIHU_URL}/question/{res.question_id}/answer/{res.content_id}"
         res.title = extract_text_from_html(answer.get("title", ""))
         res.desc = extract_text_from_html(answer.get("description", "") or answer.get("excerpt", ""))
@@ -137,7 +143,7 @@ class ZhihuExtractor:
 
         """
         res = ZhihuContent()
-        res.content_id = article.get("id")
+        res.content_id = _to_str(article.get("id"))
         res.content_type = article.get("type")
         res.content_text = extract_text_from_html(article.get("content"))
         res.content_url = f"{zhihu_constant.ZHIHU_ZHUANLAN_URL}/p/{res.content_id}"
@@ -167,6 +173,7 @@ class ZhihuExtractor:
 
         """
         res = ZhihuContent()
+        res.content_id = _to_str(zvideo.get("id"))
 
         if "video" in zvideo and isinstance(zvideo.get("video"), dict): # This indicates data from the creator's homepage video list API
             res.content_url = f"{zhihu_constant.ZHIHU_URL}/zvideo/{res.content_id}"
@@ -175,7 +182,6 @@ class ZhihuExtractor:
         else:
             res.content_url = zvideo.get("video_url")
             res.created_time = zvideo.get("created_at")
-        res.content_id = zvideo.get("id")
         res.content_type = zvideo.get("type")
         res.title = extract_text_from_html(zvideo.get("title"))
         res.desc = extract_text_from_html(zvideo.get("description"))
@@ -207,7 +213,7 @@ class ZhihuExtractor:
                 return res
             if not author.get("id"):
                 author = author.get("member")
-            res.user_id = author.get("id")
+            res.user_id = _to_str(author.get("id"))
             res.user_link = f"{zhihu_constant.ZHIHU_URL}/people/{author.get('url_token')}"
             res.user_nickname = author.get("name")
             res.user_avatar = author.get("avatar_url")
@@ -249,8 +255,8 @@ class ZhihuExtractor:
 
         """
         res = ZhihuComment()
-        res.comment_id = str(comment.get("id", ""))
-        res.parent_comment_id = comment.get("reply_comment_id")
+        res.comment_id = _to_str(comment.get("id"))
+        res.parent_comment_id = _to_str(comment.get("reply_comment_id"))
         res.content = extract_text_from_html(comment.get("content"))
         res.publish_time = comment.get("created_time")
         res.ip_location = self._extract_comment_ip_location(comment.get("comment_tag", []))
@@ -352,7 +358,7 @@ class ZhihuExtractor:
             return None
 
         res = ZhihuCreator()
-        res.user_id = creator_info.get("id")
+        res.user_id = _to_str(creator_info.get("id"))
         res.user_link = f"{zhihu_constant.ZHIHU_URL}/people/{user_url_token}"
         res.user_nickname = creator_info.get("name")
         res.user_avatar = creator_info.get("avatarUrl")

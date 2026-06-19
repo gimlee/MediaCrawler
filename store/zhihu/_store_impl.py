@@ -30,7 +30,7 @@ import pathlib
 from typing import Dict
 
 import aiofiles
-from sqlalchemy import select
+from sqlalchemy import String, Text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import config
@@ -97,12 +97,33 @@ class ZhihuCsvStoreImplement(AbstractStore):
 
 
 class ZhihuDbStoreImplement(AbstractStore):
+    @staticmethod
+    def _stringify_text_value(value):
+        if value is None:
+            return None
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    @classmethod
+    def _normalize_item_for_model(cls, model, item: Dict) -> Dict:
+        normalized_item = dict(item)
+        for column in model.__table__.columns:
+            if column.name not in normalized_item:
+                continue
+            if isinstance(column.type, (String, Text)):
+                normalized_item[column.name] = cls._stringify_text_value(
+                    normalized_item[column.name]
+                )
+        return normalized_item
+
     async def store_content(self, content_item: Dict):
         """
         Zhihu content DB storage implementation
         Args:
             content_item: content item dict
         """
+        content_item = self._normalize_item_for_model(ZhihuContent, content_item)
         content_id = content_item.get("content_id")
         async with get_session() as session:
             stmt = select(ZhihuContent).where(ZhihuContent.content_id == content_id)
@@ -125,6 +146,7 @@ class ZhihuDbStoreImplement(AbstractStore):
         Args:
             comment_item: comment item dict
         """
+        comment_item = self._normalize_item_for_model(ZhihuComment, comment_item)
         comment_id = comment_item.get("comment_id")
         async with get_session() as session:
             stmt = select(ZhihuComment).where(ZhihuComment.comment_id == comment_id)
@@ -147,6 +169,7 @@ class ZhihuDbStoreImplement(AbstractStore):
         Args:
             creator: creator dict
         """
+        creator = self._normalize_item_for_model(ZhihuCreator, creator)
         user_id = creator.get("user_id")
         async with get_session() as session:
             stmt = select(ZhihuCreator).where(ZhihuCreator.user_id == user_id)
