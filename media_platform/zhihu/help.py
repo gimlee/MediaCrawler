@@ -114,7 +114,9 @@ class ZhihuExtractor:
         res = ZhihuContent()
         res.content_id = _to_str(answer.get("id"))
         res.content_type = answer.get("type")
-        res.content_text = extract_text_from_html(answer.get("content", ""))
+        res.content_text = extract_text_from_html(
+            answer.get("content", "") or answer.get("editable_content", "")
+        )
         res.question_id = _to_str((answer.get("question") or {}).get("id"))
         res.content_url = f"{zhihu_constant.ZHIHU_URL}/question/{res.question_id}/answer/{res.content_id}"
         res.title = extract_text_from_html(answer.get("title", ""))
@@ -145,7 +147,9 @@ class ZhihuExtractor:
         res = ZhihuContent()
         res.content_id = _to_str(article.get("id"))
         res.content_type = article.get("type")
-        res.content_text = extract_text_from_html(article.get("content"))
+        res.content_text = extract_text_from_html(
+            article.get("content") or article.get("editable_content")
+        )
         res.content_url = f"{zhihu_constant.ZHIHU_ZHUANLAN_URL}/p/{res.content_id}"
         res.title = extract_text_from_html(article.get("title"))
         res.desc = extract_text_from_html(article.get("excerpt"))

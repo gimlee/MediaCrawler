@@ -197,25 +197,104 @@ class ZhihuCrawler(AbstractCrawler):
 
                     page += 1
                     content_list = await self.expand_question_answers(content_list)
+                    content_list_for_comments: List[ZhihuContent] = []
+                    page_has_failed_detail = False
                     for content in content_list:
                         resume_manager.upsert_item(content.content_id, keyword=keyword, content_type=content.content_type)
                         if resume_manager.should_skip_detail(content.content_id):
                             utils.logger.info(f"[ZhihuCrawler.search] Resume skip done content detail: {content.content_id}")
+                            content_list_for_comments.append(content)
                             continue
                         try:
                             resume_manager.mark_detail_running(content.content_id, keyword=keyword, content_type=content.content_type)
-                            await zhihu_store.update_zhihu_content(content)
-                            resume_manager.mark_detail_done(content.content_id, keyword=keyword, content_type=content.content_type)
+                            detail_content = await self.fetch_content_detail_for_search(content)
+                            if not detail_content:
+                                page_has_failed_detail = True
+                                resume_manager.mark_detail_failed(content.content_id, keyword=keyword, content_type=content.content_type)
+                                continue
+                            await zhihu_store.update_zhihu_content(detail_content)
+                            resume_manager.mark_detail_done(detail_content.content_id, keyword=keyword, content_type=detail_content.content_type)
+                            content_list_for_comments.append(detail_content)
                         except Exception:
+                            page_has_failed_detail = True
                             resume_manager.mark_detail_failed(content.content_id, keyword=keyword, content_type=content.content_type)
-                            raise
+                            utils.logger.warning(
+                                f"[ZhihuCrawler.search] Detail fetch failed, skip this content, content_id: {content.content_id}, type: {content.content_type}",
+                                exc_info=True,
+                            )
+                            continue
 
-                    await self.batch_get_content_comments(content_list)
-                    resume_manager.mark_page_done(keyword, page - 1)
+                    await self.batch_get_content_comments(content_list_for_comments)
+                    if page_has_failed_detail:
+                        resume_manager.mark_page_failed(keyword, page - 1)
+                    else:
+                        resume_manager.mark_page_done(keyword, page - 1)
                 except DataFetchError:
                     resume_manager.mark_page_failed(keyword, page)
                     utils.logger.error("[ZhihuCrawler.search] Search content error")
                     return
+
+    async def fetch_content_detail_for_search(
+        self, content: ZhihuContent
+    ) -> Optional[ZhihuContent]:
+        """
+        Fetch full detail for search results before storing.
+        Search APIs often return only excerpt/metadata, so answer/article content_text
+        must be filled from the detail page.
+        """
+        if not content or not content.content_id:
+            return None
+
+        detail_content: Optional[ZhihuContent]
+        if content.content_type == constant.ANSWER_NAME:
+            if not content.question_id:
+                utils.logger.warning(
+                    f"[ZhihuCrawler.fetch_content_detail_for_search] Missing question_id for answer {content.content_id}"
+                )
+                return None
+            detail_content = await self.zhihu_client.get_answer_info(
+                content.question_id,
+                content.content_id,
+            )
+        elif content.content_type == constant.ARTICLE_NAME:
+            detail_content = await self.zhihu_client.get_article_info(content.content_id)
+        elif content.content_type == constant.VIDEO_NAME:
+            detail_content = await self.zhihu_client.get_video_info(content.content_id)
+            if not detail_content:
+                detail_content = content
+        else:
+            detail_content = content
+
+        if not detail_content:
+            utils.logger.warning(
+                f"[ZhihuCrawler.fetch_content_detail_for_search] Detail not found, content_id: {content.content_id}, type: {content.content_type}"
+            )
+            return None
+
+        self.merge_content_summary(detail_content, content)
+        if detail_content.content_type in (constant.ANSWER_NAME, constant.ARTICLE_NAME):
+            if not (detail_content.content_text or "").strip():
+                utils.logger.warning(
+                    f"[ZhihuCrawler.fetch_content_detail_for_search] Empty content_text after detail fetch, content_id: {content.content_id}, type: {content.content_type}"
+                )
+                return None
+
+        sleep_seconds = await utils.crawler_sleep(config.CRAWLER_DETAIL_SLEEP_SEC)
+        utils.logger.info(
+            f"[ZhihuCrawler.fetch_content_detail_for_search] Sleeping for {sleep_seconds:.2f} seconds after detail fetch for content {content.content_id}"
+        )
+        return detail_content
+
+    @staticmethod
+    def merge_content_summary(detail_content: ZhihuContent, summary_content: ZhihuContent) -> None:
+        """Keep useful search-list metadata when the detail page omits it."""
+        summary_data = summary_content.model_dump()
+        for field_name, summary_value in summary_data.items():
+            if summary_value in ("", None, 0):
+                continue
+            detail_value = getattr(detail_content, field_name, None)
+            if detail_value in ("", None, 0):
+                setattr(detail_content, field_name, summary_value)
 
     async def batch_get_content_comments(self, content_list: List[ZhihuContent]):
         """

@@ -346,6 +346,28 @@ locked_until
 修复这个问题
 
 
+# P16
+CRAWLER_MAX_NOTES_COUNT = 50
+这里如果我设置的非常大，但返回的结果没有这么多，现在是怎么处理?
+
+# P17
+为什么zhihu_content表中的content_text有大量空值？
+是没有获取到数据吗？
+
+## AI回答：
+content_text 大量为空，通常表示当前流程只拿到了搜索摘要/列表数据，没有拿到正文全文。
+不是 Postgres 没写进去，也不一定是请求失败。
+
+如果你的目标是 zhihu_content.content_text 必须有正文，需要改成：搜索拿到 content_id 后，再进入详情页/API 补正文：
+answer：调用 get_answer_info(question_id, answer_id)
+article：调用 get_article_info(article_id)
+zvideo：仍然可以保持空，或只存 desc
+另外现在断点续爬里把搜索结果写入后会标记 detail_done，这个语义对知乎正文不够准确；如果要补正文，我建议把知乎 search 改成“搜索列表 -> 详情补全文 -> 入库 -> 标记 detail_done”。这样 content_text 才会更完整。
+
+# P18
+按照你的方案修改，同时修改断点续爬。
+我的目标是必须要拿到回答结果。
+还有就是你的增加断点续爬的命令，增加到说明文档中。我要重新开始爬取内容，并且更新现在content_text为空的内容。
 
 
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
