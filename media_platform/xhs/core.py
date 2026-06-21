@@ -164,7 +164,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     if not notes_res or not notes_res.get("has_more", False):
                         utils.logger.info("[XiaoHongShuCrawler.search] No more content!")
                         break
-                    semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+                    semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("xhs"))
                     post_items = [
                         post_item for post_item in notes_res.get("items", {})
                         if post_item.get("model_type") not in ("rec_query", "hot_query")
@@ -257,7 +257,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
     async def fetch_creator_notes_detail(self, note_list: List[Dict]):
         """Concurrently obtain the specified post list and save the data"""
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("xhs"))
         task_list = [
             self.get_note_detail_async_task(
                 note_id=post_item.get("note_id"),
@@ -292,7 +292,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 note_id=note_url_info.note_id,
                 xsec_source=note_url_info.xsec_source,
                 xsec_token=note_url_info.xsec_token,
-                semaphore=asyncio.Semaphore(config.MAX_CONCURRENCY_NUM),
+                semaphore=asyncio.Semaphore(config.get_platform_max_concurrency_num("xhs")),
             )
             get_note_detail_task_list.append(crawler_task)
 
@@ -370,7 +370,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
             return
 
         utils.logger.info(f"[XiaoHongShuCrawler.batch_get_note_comments] Begin batch get note comments, note list: {note_list}")
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("xhs"))
         task_list: List[Task] = []
         for index, note_id in enumerate(note_list):
             if resume_manager.should_skip_comment(note_id):

@@ -151,6 +151,10 @@ def _normalize_tieba_creator_url(value: str) -> str:
     return f"https://tieba.baidu.com/home/main?id={value}"
 
 
+def _has_cli_option(args: Sequence[str], option_name: str) -> bool:
+    return any(arg == option_name or arg.startswith(f"{option_name}=") for arg in args)
+
+
 async def parse_cmd(argv: Optional[Sequence[str]] = None):
     """Parse command line arguments using Typer."""
 
@@ -388,6 +392,16 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = max_comments_count_singlenotes
         config.CRAWLER_MAX_NOTES_COUNT = crawler_max_notes_count
         config.MAX_CONCURRENCY_NUM = max_concurrency_num
+        if _has_cli_option(cli_args, "--max_concurrency_num"):
+            platform_prefix = config.PLATFORM_MAX_CONCURRENCY_PREFIX_MAP.get(
+                platform.value
+            )
+            if platform_prefix:
+                setattr(
+                    config,
+                    f"{platform_prefix}_MAX_CONCURRENCY_NUM",
+                    max_concurrency_num,
+                )
         config.SAVE_DATA_PATH = save_data_path
         config.ENABLE_IP_PROXY = enable_ip_proxy_value
         config.IP_PROXY_POOL_COUNT = ip_proxy_pool_count

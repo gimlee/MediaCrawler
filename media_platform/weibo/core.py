@@ -214,7 +214,7 @@ class WeiboCrawler(AbstractCrawler):
         get specified notes info
         :return:
         """
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("wb"))
         pending_note_ids = []
         task_list = []
         for note_id in config.WEIBO_SPECIFIED_ID_LIST:
@@ -268,7 +268,7 @@ class WeiboCrawler(AbstractCrawler):
             return
 
         utils.logger.info(f"[WeiboCrawler.batch_get_notes_comments] note ids:{note_id_list}")
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("wb"))
         task_list: List[Task] = []
         for note_id in note_id_list:
             if resume_manager.should_skip_comment(note_id):

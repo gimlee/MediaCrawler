@@ -223,7 +223,7 @@ class BilibiliCrawler(AbstractCrawler):
                     utils.logger.info(f"[BilibiliCrawler.search_by_keywords] No more videos for '{keyword}', moving to next keyword.")
                     break
 
-                semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+                semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("bili"))
                 task_list = []
                 task_items = []
                 try:
@@ -314,7 +314,7 @@ class BilibiliCrawler(AbstractCrawler):
                             utils.logger.info(f"[BilibiliCrawler.search] No more videos for '{keyword}' on {day.ctime()}, moving to next day.")
                             break
 
-                        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+                        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("bili"))
                         task_list = [self.get_video_info_task(aid=video_item.get("aid"), bvid="", semaphore=semaphore) for video_item in video_list]
                         video_items = await asyncio.gather(*task_list)
 
@@ -356,7 +356,7 @@ class BilibiliCrawler(AbstractCrawler):
             return
 
         utils.logger.info(f"[BilibiliCrawler.batch_get_video_comments] video ids:{video_id_list}")
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("bili"))
         task_list: List[Task] = []
         for video_id in video_id_list:
             if resume_manager.should_skip_comment(video_id):
@@ -432,7 +432,7 @@ class BilibiliCrawler(AbstractCrawler):
                 utils.logger.error(f"[BilibiliCrawler.get_specified_videos] Failed to parse video URL: {e}")
                 continue
 
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("bili"))
         task_list = [self.get_video_info_task(aid=0, bvid=video_id, semaphore=semaphore) for video_id in bvids_list]
         video_details = await asyncio.gather(*task_list)
         video_aids_list = []
@@ -658,7 +658,7 @@ class BilibiliCrawler(AbstractCrawler):
 
         utils.logger.info(f"[BilibiliCrawler.get_all_creator_details] creator ids:{creator_id_list}")
 
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("bili"))
         task_list: List[Task] = []
         try:
             for creator_id in creator_id_list:

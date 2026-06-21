@@ -60,3 +60,12 @@ async def test_tieba_detail_reads_runtime_specified_ids(monkeypatch):
     await crawler.get_specified_notes()
 
     assert seen_note_ids == ["10451142633"]
+
+
+@pytest.mark.asyncio
+async def test_cli_max_concurrency_overrides_current_platform(monkeypatch):
+    monkeypatch.setattr(config, "BILI_MAX_CONCURRENCY_NUM", 2)
+
+    await parse_cmd(["--platform", "bili", "--max_concurrency_num", "5"])
+
+    assert config.get_platform_max_concurrency_num("bili") == 5

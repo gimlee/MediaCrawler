@@ -216,7 +216,7 @@ class KuaishouCrawler(AbstractCrawler):
                 utils.logger.error(f"Failed to parse video URL: {e}")
                 continue
 
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("ks"))
         pending_video_ids = []
         task_list = []
         for video_id in video_ids:
@@ -278,7 +278,7 @@ class KuaishouCrawler(AbstractCrawler):
         utils.logger.info(
             f"[KuaishouCrawler.batch_get_video_comments] video ids:{video_id_list}"
         )
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("ks"))
         task_list: List[Task] = []
         for video_id in video_id_list:
             if resume_manager.should_skip_comment(video_id):
@@ -482,7 +482,7 @@ class KuaishouCrawler(AbstractCrawler):
         """
         Concurrently obtain the specified post list and save the data
         """
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("ks"))
         task_list = [
             self.get_video_info_task(post_item.get("photo", {}).get("id"), semaphore)
             for post_item in video_list

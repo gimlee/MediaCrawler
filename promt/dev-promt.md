@@ -369,6 +369,22 @@ zvideo：仍然可以保持空，或只存 desc
 我的目标是必须要拿到回答结果。
 还有就是你的增加断点续爬的命令，增加到说明文档中。我要重新开始爬取内容，并且更新现在content_text为空的内容。
 
+# P19
+我现在是：
+uv run main.py --platform zhihu --lt qrcode --type search --save_data_option postgres --resume_task_id zhihu_refill_content_text_001 --reset_resume
+这个命令启动任务的，我现在需要停止下，修改配置，然后再启动，但需要任务继续。
+应该执行的命令是：
+uv run main.py --platform zhihu --lt qrcode --type search --save_data_option postgres --resume_task_id zhihu_refill_content_text_001
+这样？
+
+# P20
+MAX_CONCURRENCY_NUM = 3
+这个并发配置，需要按照不同平台来进行配置，默认使用这个配置。
+比如
+ZHIHU_MAX_CONCURRENCY_NUM = 10
+BILI_MAX_CONCURRENCY_NUM = 2
+代表知乎、bilibili不同平台的最大并发数。
+
 
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres

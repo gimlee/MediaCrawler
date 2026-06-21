@@ -311,7 +311,7 @@ class ZhihuCrawler(AbstractCrawler):
             )
             return
 
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("zhihu"))
         task_list: List[Task] = []
         for content_item in content_list:
             if resume_manager.should_skip_comment(content_item.content_id):
@@ -538,7 +538,7 @@ class ZhihuCrawler(AbstractCrawler):
             task_urls.append(full_note_url)
             crawler_task = self.get_note_detail(
                 full_note_url=full_note_url,
-                semaphore=asyncio.Semaphore(config.MAX_CONCURRENCY_NUM),
+                semaphore=asyncio.Semaphore(config.get_platform_max_concurrency_num("zhihu")),
             )
             get_note_detail_task_list.append(crawler_task)
 

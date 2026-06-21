@@ -17,6 +17,8 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
+import sys
+
 # Basic configuration
 PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu
 
@@ -108,6 +110,47 @@ CRAWLER_MAX_NOTES_COUNT = 50
 # Controlling the number of concurrent crawlers
 MAX_CONCURRENCY_NUM = 3
 
+# Platform-specific concurrency. None means use MAX_CONCURRENCY_NUM.
+XHS_MAX_CONCURRENCY_NUM = None
+DY_MAX_CONCURRENCY_NUM = None
+KS_MAX_CONCURRENCY_NUM = None
+BILI_MAX_CONCURRENCY_NUM = 2
+WEIBO_MAX_CONCURRENCY_NUM = None
+TIEBA_MAX_CONCURRENCY_NUM = None
+ZHIHU_MAX_CONCURRENCY_NUM = 10
+
+PLATFORM_MAX_CONCURRENCY_PREFIX_MAP = {
+    "xhs": "XHS",
+    "dy": "DY",
+    "ks": "KS",
+    "bili": "BILI",
+    "wb": "WEIBO",
+    "tieba": "TIEBA",
+    "zhihu": "ZHIHU",
+}
+
+
+def get_platform_max_concurrency_num(platform: str) -> int:
+    config_module = sys.modules.get("config")
+
+    def get_config_value(name: str):
+        if config_module and hasattr(config_module, name):
+            return getattr(config_module, name)
+        return globals().get(name)
+
+    platform_prefix_map = get_config_value("PLATFORM_MAX_CONCURRENCY_PREFIX_MAP")
+    platform_prefix = platform_prefix_map.get(platform) if platform_prefix_map else None
+    if not platform_prefix:
+        return int(get_config_value("MAX_CONCURRENCY_NUM"))
+
+    platform_max_concurrency_num = get_config_value(
+        f"{platform_prefix}_MAX_CONCURRENCY_NUM"
+    )
+    if platform_max_concurrency_num is None:
+        return int(get_config_value("MAX_CONCURRENCY_NUM"))
+
+    return int(platform_max_concurrency_num)
+
 # Whether to enable crawling media mode (including image or video resources), crawling media is not enabled by default
 ENABLE_GET_MEIDAS = False
 
@@ -138,7 +181,7 @@ STOP_WORDS_FILE = "./docs/hit_stopwords.txt"
 FONT_PATH = "./docs/STZHONGS.TTF"
 
 # Crawl interval. Supports fixed seconds, e.g. 10, or random range, e.g. [10, 30].
-CRAWLER_MAX_SLEEP_SEC = [10, 30]
+CRAWLER_MAX_SLEEP_SEC = [10, 20]
 
 # Search/page-turn sleep interval.
 CRAWLER_PAGE_SLEEP_SEC = [8, 18]

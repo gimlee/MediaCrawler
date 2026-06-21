@@ -265,7 +265,7 @@ class TieBaCrawler(AbstractCrawler):
         """
         if note_id_list is None:
             note_id_list = config.TIEBA_SPECIFIED_ID_LIST
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("tieba"))
         pending_note_ids = []
         for note_id in note_id_list:
             resume_manager.upsert_item(note_id, keyword=source_keyword_var.get(), content_type="note")
@@ -340,7 +340,7 @@ class TieBaCrawler(AbstractCrawler):
         if not config.ENABLE_GET_COMMENTS:
             return
 
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("tieba"))
         task_list: List[Task] = []
         for note_detail in note_detail_list:
             if resume_manager.should_skip_comment(note_detail.note_id):

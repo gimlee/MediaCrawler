@@ -227,7 +227,7 @@ class DouYinCrawler(AbstractCrawler):
                 utils.logger.error(f"[DouYinCrawler.get_specified_awemes] Failed to parse video URL: {e}")
                 continue
 
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("dy"))
         pending_aweme_ids = []
         task_list = []
         for aweme_id in aweme_id_list:
@@ -273,7 +273,7 @@ class DouYinCrawler(AbstractCrawler):
             return
 
         task_list: List[Task] = []
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("dy"))
         for aweme_id in aweme_list:
             if resume_manager.should_skip_comment(aweme_id):
                 utils.logger.info(f"[DouYinCrawler.batch_get_note_comments] Resume skip done comments, aweme_id: {aweme_id}")
@@ -336,7 +336,7 @@ class DouYinCrawler(AbstractCrawler):
         """
         Concurrently obtain the specified post list and save the data
         """
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("dy"))
         task_list = [self.get_aweme_detail(post_item.get("aweme_id"), semaphore) for post_item in video_list]
 
         note_details = await asyncio.gather(*task_list)
