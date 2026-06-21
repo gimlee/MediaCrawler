@@ -69,3 +69,11 @@ async def test_cli_max_concurrency_overrides_current_platform(monkeypatch):
     await parse_cmd(["--platform", "bili", "--max_concurrency_num", "5"])
 
     assert config.get_platform_max_concurrency_num("bili") == 5
+
+
+@pytest.mark.asyncio
+async def test_cli_accepts_fix_content_type():
+    await parse_cmd(["--platform", "zhihu", "--type", "fix_content"])
+
+    assert config.PLATFORM == "zhihu"
+    assert config.CRAWLER_TYPE == "fix_content"

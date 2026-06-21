@@ -170,6 +170,7 @@ async def get_config_options():
             {"value": "search", "label": "Search Mode"},
             {"value": "detail", "label": "Detail Mode"},
             {"value": "creator", "label": "Creator Mode"},
+            {"value": "fix_content", "label": "Fix Content Mode"},
         ],
         "save_options": [
             {"value": "jsonl", "label": "JSONL File"},

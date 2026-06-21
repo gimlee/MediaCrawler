@@ -22,8 +22,12 @@
 from typing import List
 
 import config
+from constant import zhihu as zhihu_constant
 from base.base_crawler import AbstractStore
+from database.db_session import get_session
+from database.models import ZhihuContent as ZhihuContentModel
 from model.m_zhihu import ZhihuComment, ZhihuContent, ZhihuCreator
+from sqlalchemy import func, or_, select
 from ._store_impl import (ZhihuCsvStoreImplement,
                                           ZhihuDbStoreImplement,
                                           ZhihuJsonStoreImplement,
@@ -83,6 +87,66 @@ async def update_zhihu_content(content_item: ZhihuContent):
     local_db_item.update({"last_modify_ts": utils.get_current_timestamp()})
     utils.logger.info(f"[store.zhihu.update_zhihu_content] zhihu content: {local_db_item}")
     await ZhihuStoreFactory.create_store().store_content(local_db_item)
+
+
+async def get_empty_content_text_contents() -> List[ZhihuContent]:
+    """
+    Get Zhihu answer/article rows whose content_text is empty.
+    """
+    async with get_session() as session:
+        if session is None:
+            raise ValueError(
+                "[store.zhihu.get_empty_content_text_contents] Database save option is required"
+            )
+
+        stmt = (
+            select(ZhihuContentModel)
+            .where(
+                ZhihuContentModel.content_type.in_(
+                    [zhihu_constant.ANSWER_NAME, zhihu_constant.ARTICLE_NAME]
+                )
+            )
+            .where(
+                or_(
+                    ZhihuContentModel.content_text.is_(None),
+                    func.length(func.trim(ZhihuContentModel.content_text)) == 0,
+                )
+            )
+            .where(ZhihuContentModel.content_url.is_not(None))
+            .where(func.length(func.trim(ZhihuContentModel.content_url)) > 0)
+            .order_by(ZhihuContentModel.id.asc())
+        )
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+
+    def to_int(value) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return [
+        ZhihuContent(
+            content_id=row.content_id or "",
+            content_type=row.content_type or "",
+            content_text=row.content_text or "",
+            content_url=row.content_url or "",
+            question_id=row.question_id or "",
+            title=row.title or "",
+            desc=row.desc or "",
+            created_time=to_int(row.created_time),
+            updated_time=to_int(row.updated_time),
+            voteup_count=row.voteup_count or 0,
+            comment_count=row.comment_count or 0,
+            source_keyword=row.source_keyword or "",
+            user_id=row.user_id or "",
+            user_link=row.user_link or "",
+            user_nickname=row.user_nickname or "",
+            user_avatar=row.user_avatar or "",
+            user_url_token=row.user_url_token or "",
+        )
+        for row in rows
+    ]
 
 
 

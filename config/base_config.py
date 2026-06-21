@@ -27,7 +27,7 @@ PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu
 XHS_INTERNATIONAL = False
 
 #好吃的,好玩的,好看的,好喝的,好笑的
-KEYWORDS = "AI,智能体,codex,claude code,人工智能,豆包,千问,agent,gpt,gemini,AI视频,AI生图,AI图片,AI,智谱,deepseek,glm5.2"  # Keyword search configuration, separated by English commas
+KEYWORDS = "AI,智能体,codex,claude code,人工智能,豆包,千问,agent,gpt,gemini,AI视频,AI生图,AI图片,智谱,deepseek,glm5.2"  # Keyword search configuration, separated by English commas
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = (

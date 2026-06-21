@@ -385,6 +385,12 @@ ZHIHU_MAX_CONCURRENCY_NUM = 10
 BILI_MAX_CONCURRENCY_NUM = 2
 代表知乎、bilibili不同平台的最大并发数。
 
+# P21
+新增命令：补充知乎平台的空白内容。
+当前知乎平台中，有大量的content_text中有大量的空白内容，可能是之前的bug导致，需要对该平台的空白内容再去请求一次。
+uv run main.py --platform zhihu --lt qrcode --type fix_content --save_data_option postgres
+该命令把content_text为空的内容，找到对应的URL，请求更新内容
+
 
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres

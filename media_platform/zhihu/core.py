@@ -143,6 +143,9 @@ class ZhihuCrawler(AbstractCrawler):
             elif config.CRAWLER_TYPE == "creator":
                 # Get creator's information and their notes and comments
                 await self.get_creators_and_notes()
+            elif config.CRAWLER_TYPE == "fix_content":
+                # Re-fetch blank answer/article content_text rows from storage.
+                await self.fix_empty_content_text()
             else:
                 pass
 
@@ -558,6 +561,72 @@ class ZhihuCrawler(AbstractCrawler):
             resume_manager.mark_detail_done(note_detail.content_id, content_type=note_detail.content_type)
 
         await self.batch_get_content_comments(need_get_comment_notes)
+
+    async def fix_empty_content_text(self):
+        """
+        Re-fetch Zhihu answer/article rows whose content_text is empty.
+        """
+        utils.logger.info(
+            "[ZhihuCrawler.fix_empty_content_text] Begin fix empty zhihu content_text"
+        )
+        empty_contents = await zhihu_store.get_empty_content_text_contents()
+        utils.logger.info(
+            f"[ZhihuCrawler.fix_empty_content_text] Found {len(empty_contents)} empty contents"
+        )
+        if not empty_contents:
+            return
+
+        semaphore = asyncio.Semaphore(config.get_platform_max_concurrency_num("zhihu"))
+        task_list = []
+        task_contents = []
+        for content in empty_contents:
+            full_note_url = (content.content_url or "").split("?")[0]
+            if not full_note_url:
+                continue
+            task_contents.append(content)
+            task_list.append(
+                self.get_note_detail(full_note_url=full_note_url, semaphore=semaphore)
+            )
+
+        fixed_count = 0
+        failed_count = 0
+        note_details = await asyncio.gather(*task_list, return_exceptions=True)
+        for index, note_detail in enumerate(note_details):
+            source_content = task_contents[index]
+            if isinstance(note_detail, Exception):
+                failed_count += 1
+                utils.logger.warning(
+                    f"[ZhihuCrawler.fix_empty_content_text] Fetch failed, content_id: {source_content.content_id}",
+                    exc_info=(
+                        type(note_detail),
+                        note_detail,
+                        note_detail.__traceback__,
+                    ),
+                )
+                continue
+
+            if not note_detail:
+                failed_count += 1
+                utils.logger.warning(
+                    f"[ZhihuCrawler.fix_empty_content_text] Detail not found, content_id: {source_content.content_id}"
+                )
+                continue
+
+            note_detail = cast(ZhihuContent, note_detail)
+            self.merge_content_summary(note_detail, source_content)
+            if not (note_detail.content_text or "").strip():
+                failed_count += 1
+                utils.logger.warning(
+                    f"[ZhihuCrawler.fix_empty_content_text] Detail content_text still empty, content_id: {source_content.content_id}"
+                )
+                continue
+
+            await zhihu_store.update_zhihu_content(note_detail)
+            fixed_count += 1
+
+        utils.logger.info(
+            f"[ZhihuCrawler.fix_empty_content_text] Finished, fixed: {fixed_count}, failed: {failed_count}"
+        )
 
     async def create_zhihu_client(self, httpx_proxy: Optional[str]) -> ZhiHuClient:
         """Create zhihu client"""
