@@ -20,7 +20,7 @@
 import sys
 
 # Basic configuration
-PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu
+PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu | juejin
 
 # 是否使用海外版小红书 (rednote.com)
 # 开启后 API 走 webapi.rednote.com，cookie 域使用 .rednote.com
@@ -118,6 +118,7 @@ BILI_MAX_CONCURRENCY_NUM = 2
 WEIBO_MAX_CONCURRENCY_NUM = None
 TIEBA_MAX_CONCURRENCY_NUM = None
 ZHIHU_MAX_CONCURRENCY_NUM = 10
+JUEJIN_MAX_CONCURRENCY_NUM = 5
 
 PLATFORM_MAX_CONCURRENCY_PREFIX_MAP = {
     "xhs": "XHS",
@@ -127,6 +128,7 @@ PLATFORM_MAX_CONCURRENCY_PREFIX_MAP = {
     "wb": "WEIBO",
     "tieba": "TIEBA",
     "zhihu": "ZHIHU",
+    "juejin": "JUEJIN",
 }
 
 
@@ -230,3 +232,4 @@ from .ks_config import *
 from .weibo_config import *
 from .tieba_config import *
 from .zhihu_config import *
+from .juejin_config import *
