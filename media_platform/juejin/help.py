@@ -200,21 +200,36 @@ class JuejinExtractor:
     def _extract_comment(self, comment: Dict) -> Optional[JuejinComment]:
         if not comment:
             return None
+
         comment_info = comment.get("comment_info") or {}
-        comment_id = comment_info.get("comment_id") or comment.get("comment_id")
+        reply_info = comment.get("reply_info") or {}
+        info = comment_info or reply_info
+        is_reply = bool(reply_info)
+        comment_id = (
+            info.get("comment_id")
+            or info.get("reply_id")
+            or comment.get("comment_id")
+            or comment.get("reply_id")
+        )
         if not comment_id:
             return None
 
         res = JuejinComment()
         res.comment_id = str(comment_id)
-        res.content = extract_text_from_html(comment_info.get("comment_content", ""))
-        res.publish_time = _to_int(comment_info.get("ctime"))
-        res.sub_comment_count = _to_int(comment_info.get("reply_count"))
-        res.like_count = _to_int(comment_info.get("digg_count"))
+        content = (
+            info.get("reply_content")
+            if is_reply
+            else info.get("comment_content")
+        )
+        res.content = extract_text_from_html(content or "")
+        res.publish_time = _to_int(info.get("ctime"))
+        res.sub_comment_count = 0 if is_reply else _to_int(info.get("reply_count"))
+        res.like_count = _to_int(info.get("digg_count"))
         parent_id = (
-            comment_info.get("reply_id")
-            or comment_info.get("reply_to_comment_id")
-            or comment_info.get("parent_comment_id")
+            info.get("reply_comment_id")
+            or info.get("reply_to_comment_id")
+            or info.get("parent_comment_id")
+            or (info.get("reply_id") if not is_reply else "")
             or ""
         )
         res.parent_comment_id = str(parent_id)

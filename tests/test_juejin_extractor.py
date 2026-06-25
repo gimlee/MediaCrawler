@@ -53,3 +53,26 @@ def test_extract_juejin_comment_supports_parent_id_fallbacks():
     )
 
     assert [comment.parent_comment_id for comment in comments] == ["123", "root-2"]
+
+
+def test_extract_juejin_reply_uses_real_reply_info_shape():
+    comments = JuejinExtractor().extract_comments(
+        [
+            {
+                "reply_info": {
+                    "reply_id": "child-1",
+                    "reply_comment_id": "root-1",
+                    "reply_content": "<p>child reply</p>",
+                    "ctime": "101",
+                    "digg_count": 2,
+                },
+                "user_info": {"user_id": "u2", "user_name": "Bob"},
+            }
+        ]
+    )
+
+    assert len(comments) == 1
+    assert comments[0].comment_id == "child-1"
+    assert comments[0].parent_comment_id == "root-1"
+    assert comments[0].content == "child reply"
+    assert comments[0].sub_comment_count == 0

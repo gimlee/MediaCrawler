@@ -259,16 +259,14 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
         """
         Get article detail.
 
-        Juejin's public ``content_api/v1/article/detail`` returns the metadata
-        (counts, author, category) but an *empty* body for the article text.
-        To actually store the content body we therefore navigate the page to
-        the article and read the rendered DOM (same approach zhihu uses for
-        its HTML detail flow). The DOM body is merged back into the API result.
+        Juejin's public ``content_api/v1/article/detail`` can return incomplete
+        article data. Navigate to the rendered page and merge missing body,
+        title, and description fields from the DOM into the API result.
         """
         detail = await self._get_article_detail_api(article_id)
 
-        body_text = await self._fetch_article_dom_body(article_id)
-        if body_text:
+        dom_article = await self._fetch_article_dom_article(article_id)
+        if any(dom_article.values()):
             if detail is None:
                 # The detail API failed (rare), but the DOM page still works.
                 # Build a minimal content object from the DOM.
@@ -278,8 +276,10 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
                 detail.content_url = (
                     f"{juejin_constant.JUEJIN_URL}/post/{article_id}"
                 )
-            if not (detail.content_text or "").strip():
-                detail.content_text = body_text
+            for field_name in ("content_text", "title", "desc"):
+                dom_value = dom_article[field_name]
+                if dom_value and not (getattr(detail, field_name) or "").strip():
+                    setattr(detail, field_name, dom_value)
 
         return detail
 
@@ -309,16 +309,17 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
             return None
         return self._extractor.extract_article_detail(res)
 
-    async def _fetch_article_dom_body(self, article_id: str) -> str:
+    async def _fetch_article_dom_article(self, article_id: str) -> Dict[str, str]:
         """
-        Navigate to the article page and read its rendered body text from the DOM.
+        Read rendered article body and metadata from the DOM in one evaluation.
 
-        Juejin renders the article inside an element whose class contains
-        ``article-view``. We grab its innerText, which is clean plain text.
-        Returns "" if the body could not be read.
+        Prefer Juejin's article selectors for visible content and standard
+        metadata tags for the description. Empty strings are returned when a
+        field cannot be read.
         """
+        empty_article = {"content_text": "", "title": "", "desc": ""}
         if self.playwright_page is None:
-            return ""
+            return empty_article
         article_url = f"{juejin_constant.JUEJIN_URL}/post/{article_id}"
         try:
             await self.playwright_page.goto(
@@ -326,22 +327,45 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
             )
             # Give juejin's SPA a moment to render the body.
             await asyncio.sleep(2)
-            text = await self.playwright_page.evaluate(
+            article = await self.playwright_page.evaluate(
                 """
                 () => {
-                    const el = document.querySelector('[class*="article-view"]')
+                    const text = (el) => el ? (el.innerText || el.textContent || '').trim() : '';
+                    const meta = (selector) => {
+                        const el = document.querySelector(selector);
+                        return el ? (el.content || '').trim() : '';
+                    };
+                    const body = document.querySelector('[class*="article-view"]')
                         || document.querySelector('.article-content')
                         || document.querySelector('article');
-                    return el ? el.innerText.trim() : '';
+                    const title = document.querySelector('.article-title')
+                        || document.querySelector('article h1')
+                        || document.querySelector('h1');
+                    return {
+                        content_text: text(body),
+                        title: text(title) || meta('meta[property="og:title"]'),
+                        desc: meta('meta[name="description"]')
+                            || meta('meta[property="og:description"]'),
+                    };
                 }
                 """
             )
-            return (text or "").strip()
+            if not isinstance(article, dict):
+                return empty_article
+            return {
+                field_name: str(article.get(field_name) or "").strip()
+                for field_name in empty_article
+            }
         except Exception as e:
             utils.logger.warning(
-                f"[JuejinClient._fetch_article_dom_body] failed for {article_id}: {e}"
+                f"[JuejinClient._fetch_article_dom_article] failed for {article_id}: {e}"
             )
-            return ""
+            return empty_article
+
+    async def _fetch_article_dom_body(self, article_id: str) -> str:
+        """Backward-compatible body-only wrapper for existing callers."""
+        article = await self._fetch_article_dom_article(article_id)
+        return article["content_text"]
 
     # ------------------------------------------------------------------
     # Comments
@@ -377,18 +401,18 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
         cursor: str = "0",
         limit: int = 20,
     ) -> Dict:
-        """POST /interact_api/v1/comment/reply_list for one root comment."""
+        """POST /interact_api/v1/reply/list for one root comment."""
         payload = {
-            "cursor": str(cursor),
+            "comment_id": str(comment_id),
             "item_id": str(article_id),
             "item_type": 2,
-            "comment_id": str(comment_id),
-            "client_type": 2608,
+            "cursor": str(cursor),
             "limit": int(limit),
+            "client_type": 2608,
         }
         url = (
             f"{juejin_constant.JUEJIN_API_URL}"
-            f"/interact_api/v1/comment/reply_list?{_API_QS}"
+            f"/interact_api/v1/reply/list?{_API_QS}"
         )
         return await self._post(url, payload)
 
@@ -440,9 +464,36 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
 
             result.extend(comments)
             root_comment_count += len(comments)
+
+            embedded_child_comments: List[JuejinComment] = []
+            raw_items = res.get("data") or []
+            raw_by_comment_id = {
+                str(
+                    (raw_item.get("comment_info") or {}).get("comment_id")
+                    or raw_item.get("comment_id")
+                    or ""
+                ): raw_item
+                for raw_item in raw_items
+            }
+            for root_comment in comments:
+                raw_item = raw_by_comment_id.get(root_comment.comment_id) or {}
+                embedded_items = raw_item.get("reply_infos") or []
+                parsed_embedded = self._extractor.extract_comments(embedded_items)
+                for child_comment in parsed_embedded:
+                    child_comment.content_id = content.content_id
+                    child_comment.parent_comment_id = (
+                        child_comment.parent_comment_id or root_comment.comment_id
+                    )
+                embedded_child_comments.extend(parsed_embedded)
+
+            if callback and embedded_child_comments:
+                await callback(embedded_child_comments)
+            result.extend(embedded_child_comments)
+
             child_comments = await self.get_comments_all_sub_comments(
                 content,
                 comments,
+                embedded_child_comments=embedded_child_comments,
                 crawl_interval=crawl_interval,
                 callback=callback,
             )
@@ -467,6 +518,7 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
         self,
         content: JuejinContent,
         comments: List[JuejinComment],
+        embedded_child_comments: Optional[List[JuejinComment]] = None,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
     ) -> List[JuejinComment]:
@@ -475,12 +527,23 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
             return []
 
         result: List[JuejinComment] = []
+        embedded_child_comments = embedded_child_comments or []
+        embedded_by_parent: Dict[str, set[str]] = {}
+        for child_comment in embedded_child_comments:
+            embedded_by_parent.setdefault(
+                child_comment.parent_comment_id, set()
+            ).add(child_comment.comment_id)
+
         for root_comment in comments:
             if root_comment.sub_comment_count <= 0:
+                continue
+            embedded_ids = embedded_by_parent.get(root_comment.comment_id, set())
+            if root_comment.sub_comment_count <= len(embedded_ids):
                 continue
 
             cursor = "0"
             has_more = True
+            seen_ids = set(embedded_ids)
             while has_more:
                 response = await self.get_child_comments(
                     content.content_id,
@@ -495,6 +558,14 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
                     child_comment.parent_comment_id = (
                         child_comment.parent_comment_id or root_comment.comment_id
                     )
+                child_comments = [
+                    child_comment
+                    for child_comment in child_comments
+                    if child_comment.comment_id not in seen_ids
+                ]
+                seen_ids.update(
+                    child_comment.comment_id for child_comment in child_comments
+                )
 
                 if callback and child_comments:
                     await callback(child_comments)
@@ -502,7 +573,7 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
 
                 next_cursor = self.extract_cursor(response)
                 has_more = self.has_more(response)
-                if not child_comments or not next_cursor or next_cursor == cursor:
+                if not next_cursor or next_cursor == cursor:
                     break
 
                 cursor = next_cursor
