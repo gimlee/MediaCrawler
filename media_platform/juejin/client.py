@@ -40,6 +40,7 @@ import json
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
+import config
 from playwright.async_api import BrowserContext, Page
 
 from base.base_crawler import AbstractApiClient
@@ -369,6 +370,28 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
         url = f"{juejin_constant.JUEJIN_API_URL}/interact_api/v1/comment/list?{_API_QS}"
         return await self._post(url, payload)
 
+    async def get_child_comments(
+        self,
+        article_id: str,
+        comment_id: str,
+        cursor: str = "0",
+        limit: int = 20,
+    ) -> Dict:
+        """POST /interact_api/v1/comment/reply_list for one root comment."""
+        payload = {
+            "cursor": str(cursor),
+            "item_id": str(article_id),
+            "item_type": 2,
+            "comment_id": str(comment_id),
+            "client_type": 2608,
+            "limit": int(limit),
+        }
+        url = (
+            f"{juejin_constant.JUEJIN_API_URL}"
+            f"/interact_api/v1/comment/reply_list?{_API_QS}"
+        )
+        return await self._post(url, payload)
+
     async def get_note_all_comments(
         self,
         content: JuejinContent,
@@ -376,14 +399,15 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
         callback: Optional[Callable] = None,
         max_count: Optional[int] = None,
     ) -> List[JuejinComment]:
-        """Get all root-level comments for a given article."""
+        """Get root comments and, when enabled, all replies for each root."""
         result: List[JuejinComment] = []
+        root_comment_count = 0
         cursor = "0"
         has_more = True
         limit = 20
 
         while has_more:
-            if max_count is not None and len(result) >= max_count:
+            if max_count is not None and root_comment_count >= max_count:
                 break
             try:
                 res = await self.get_root_comments(content.content_id, cursor, limit)
@@ -404,7 +428,7 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
                 break
 
             if max_count is not None:
-                remaining = max_count - len(result)
+                remaining = max_count - root_comment_count
                 comments = comments[:remaining]
 
             # backfill content_id on each comment
@@ -415,6 +439,14 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(comments)
 
             result.extend(comments)
+            root_comment_count += len(comments)
+            child_comments = await self.get_comments_all_sub_comments(
+                content,
+                comments,
+                crawl_interval=crawl_interval,
+                callback=callback,
+            )
+            result.extend(child_comments)
 
             if next_cursor and next_cursor != cursor:
                 cursor = next_cursor
@@ -429,6 +461,59 @@ class JuejinClient(AbstractApiClient, ProxyRefreshMixin):
                 f"[JuejinClient.get_note_all_comments] Sleeping for {sleep_seconds:.2f}s "
                 f"before next comment page for content {content.content_id}"
             )
+        return result
+
+    async def get_comments_all_sub_comments(
+        self,
+        content: JuejinContent,
+        comments: List[JuejinComment],
+        crawl_interval: float = 1.0,
+        callback: Optional[Callable] = None,
+    ) -> List[JuejinComment]:
+        """Fetch every child-comment page for the supplied root comments."""
+        if not config.ENABLE_GET_SUB_COMMENTS:
+            return []
+
+        result: List[JuejinComment] = []
+        for root_comment in comments:
+            if root_comment.sub_comment_count <= 0:
+                continue
+
+            cursor = "0"
+            has_more = True
+            while has_more:
+                response = await self.get_child_comments(
+                    content.content_id,
+                    root_comment.comment_id,
+                    cursor,
+                )
+                child_comments = self._extractor.extract_comments(
+                    response.get("data") or []
+                )
+                for child_comment in child_comments:
+                    child_comment.content_id = content.content_id
+                    child_comment.parent_comment_id = (
+                        child_comment.parent_comment_id or root_comment.comment_id
+                    )
+
+                if callback and child_comments:
+                    await callback(child_comments)
+                result.extend(child_comments)
+
+                next_cursor = self.extract_cursor(response)
+                has_more = self.has_more(response)
+                if not child_comments or not next_cursor or next_cursor == cursor:
+                    break
+
+                cursor = next_cursor
+                if has_more:
+                    sleep_seconds = await utils.crawler_sleep(crawl_interval)
+                    utils.logger.info(
+                        "[JuejinClient.get_comments_all_sub_comments] "
+                        f"Sleeping for {sleep_seconds:.2f}s before next child "
+                        f"comment page for root {root_comment.comment_id}"
+                    )
+
         return result
 
     # ------------------------------------------------------------------

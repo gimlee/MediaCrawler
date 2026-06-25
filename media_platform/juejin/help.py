@@ -211,6 +211,13 @@ class JuejinExtractor:
         res.publish_time = _to_int(comment_info.get("ctime"))
         res.sub_comment_count = _to_int(comment_info.get("reply_count"))
         res.like_count = _to_int(comment_info.get("digg_count"))
+        parent_id = (
+            comment_info.get("reply_id")
+            or comment_info.get("reply_to_comment_id")
+            or comment_info.get("parent_comment_id")
+            or ""
+        )
+        res.parent_comment_id = str(parent_id)
 
         user_info = comment.get("user_info") or {}
         res.user_id = str(user_info.get("user_id", "") or "")
