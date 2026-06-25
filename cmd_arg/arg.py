@@ -26,6 +26,7 @@ import re
 from enum import Enum
 from types import SimpleNamespace
 from typing import Iterable, Optional, Sequence, Type, TypeVar
+from urllib.parse import urlparse
 
 import typer
 from typing_extensions import Annotated
@@ -151,6 +152,27 @@ def _normalize_tieba_creator_url(value: str) -> str:
     if value.startswith("http://") or value.startswith("https://"):
         return value
     return f"https://tieba.baidu.com/home/main?id={value}"
+
+
+def _normalize_juejin_path_id(value: str, path_prefix: str) -> str:
+    value = value.strip()
+    if not value.startswith(("http://", "https://")):
+        return value
+
+    path_parts = [part for part in urlparse(value).path.split("/") if part]
+    try:
+        prefix_index = path_parts.index(path_prefix)
+        return path_parts[prefix_index + 1]
+    except (ValueError, IndexError):
+        return value
+
+
+def _normalize_juejin_article_id(value: str) -> str:
+    return _normalize_juejin_path_id(value, "post")
+
+
+def _normalize_juejin_creator_id(value: str) -> str:
+    return _normalize_juejin_path_id(value, "user")
 
 
 def _has_cli_option(args: Sequence[str], option_name: str) -> bool:
@@ -432,7 +454,9 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             elif platform == PlatformEnum.ZHIHU:
                 config.ZHIHU_SPECIFIED_ID_LIST = specified_id_list
             elif platform == PlatformEnum.JUEJIN:
-                config.JUEJIN_SPECIFIED_ID_LIST = specified_id_list
+                config.JUEJIN_SPECIFIED_ID_LIST = [
+                    _normalize_juejin_article_id(item) for item in specified_id_list
+                ]
 
         if creator_id_list:
             if platform == PlatformEnum.XHS:
@@ -450,7 +474,9 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                     _normalize_tieba_creator_url(item) for item in creator_id_list
                 ]
             elif platform == PlatformEnum.JUEJIN:
-                config.JUEJIN_CREATOR_ID_LIST = creator_id_list
+                config.JUEJIN_CREATOR_ID_LIST = [
+                    _normalize_juejin_creator_id(item) for item in creator_id_list
+                ]
 
         return SimpleNamespace(
             platform=config.PLATFORM,
