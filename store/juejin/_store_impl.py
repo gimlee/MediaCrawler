@@ -75,8 +75,12 @@ class JuejinDbStoreImplement(AbstractStore):
 
     async def store_content(self, content_item: Dict):
         """Juejin content DB storage implementation."""
+        content_item = dict(content_item)
+        content_id = str(content_item.get("content_id") or "").strip()
+        if not content_id:
+            raise ValueError("Juejin content_id is required")
+        content_item["content_id"] = content_id
         content_item = self._normalize_item_for_model(JuejinContent, content_item)
-        content_id = content_item.get("content_id")
         async with get_session() as session:
             stmt = select(JuejinContent).where(JuejinContent.content_id == content_id)
             result = await session.execute(stmt)
@@ -94,8 +98,12 @@ class JuejinDbStoreImplement(AbstractStore):
 
     async def store_comment(self, comment_item: Dict):
         """Juejin comment DB storage implementation."""
+        comment_item = dict(comment_item)
+        comment_id = str(comment_item.get("comment_id") or "").strip()
+        if not comment_id:
+            raise ValueError("Juejin comment_id is required")
+        comment_item["comment_id"] = comment_id
         comment_item = self._normalize_item_for_model(JuejinComment, comment_item)
-        comment_id = comment_item.get("comment_id")
         async with get_session() as session:
             stmt = select(JuejinComment).where(JuejinComment.comment_id == comment_id)
             result = await session.execute(stmt)
@@ -113,8 +121,12 @@ class JuejinDbStoreImplement(AbstractStore):
 
     async def store_creator(self, creator: Dict):
         """Juejin creator DB storage implementation."""
+        creator = dict(creator)
+        user_id = str(creator.get("user_id") or "").strip()
+        if not user_id:
+            raise ValueError("Juejin user_id is required")
+        creator["user_id"] = user_id
         creator = self._normalize_item_for_model(JuejinCreator, creator)
-        user_id = creator.get("user_id")
         async with get_session() as session:
             stmt = select(JuejinCreator).where(JuejinCreator.user_id == user_id)
             result = await session.execute(stmt)

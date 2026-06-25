@@ -51,8 +51,9 @@ class JuejinStoreFactory:
     def create_store() -> AbstractStore:
         store_class = JuejinStoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
+            supported = ", ".join(sorted(JuejinStoreFactory.STORES))
             raise ValueError(
-                "[JuejinStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ..."
+                f"[JuejinStoreFactory.create_store] Invalid save option. Supported: {supported}"
             )
         return store_class()
 
