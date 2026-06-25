@@ -92,7 +92,10 @@ class JuejinCrawler(AbstractCrawler):
                 utils.logger.info("[JuejinCrawler] Launching browser in standard mode")
                 chromium = playwright.chromium
                 self.browser_context = await self.launch_browser(
-                    chromium, None, self.user_agent, headless=config.HEADLESS
+                    chromium,
+                    playwright_proxy_format,
+                    self.user_agent,
+                    headless=config.HEADLESS,
                 )
                 await self.browser_context.add_init_script(path="libs/stealth.min.js")
 
@@ -167,10 +170,22 @@ class JuejinCrawler(AbstractCrawler):
 
             while has_more and fetched_count < config.CRAWLER_MAX_NOTES_COUNT:
                 try:
-                    if page < start_page:
-                        utils.logger.info(
-                            f"[JuejinCrawler.search] Skip page {page} (cursor={cursor})"
-                        )
+                    is_before_start = page < start_page
+                    is_resume_done = (
+                        not is_before_start
+                        and resume_manager.is_page_done(keyword, page)
+                    )
+                    if is_before_start or is_resume_done:
+                        if is_before_start:
+                            utils.logger.info(
+                                f"[JuejinCrawler.search] Skip page {page} (cursor={cursor})"
+                            )
+                        else:
+                            utils.logger.info(
+                                f"[JuejinCrawler.search] Resume skip done page, "
+                                f"keyword: {keyword}, page: {page}, cursor: {cursor}"
+                            )
+
                         raw_res = await self.juejin_client.search_raw(
                             keyword=keyword,
                             cursor=cursor,
@@ -185,18 +200,16 @@ class JuejinCrawler(AbstractCrawler):
                         else:
                             has_more = False
                         page += 1
-                        fetched_count += page_size
-                        await utils.crawler_sleep(config.CRAWLER_PAGE_SLEEP_SEC)
+                        if has_more:
+                            await utils.crawler_sleep(
+                                config.CRAWLER_PAGE_SLEEP_SEC
+                            )
                         continue
 
-                    if resume_manager.is_page_done(keyword, page):
-                        utils.logger.info(
-                            f"[JuejinCrawler.search] Resume skip done page, keyword: {keyword}, page: {page}"
-                        )
-                        page += 1
-                        continue
-
-                    resume_manager.mark_page_running(keyword, page)
+                    page_cursor = cursor
+                    resume_manager.mark_page_running(
+                        keyword, page, cursor=page_cursor
+                    )
                     utils.logger.info(
                         f"[JuejinCrawler.search] search juejin keyword: {keyword}, page: {page}, cursor: {cursor}"
                     )
@@ -284,11 +297,17 @@ class JuejinCrawler(AbstractCrawler):
                         has_more = False
 
                     if page_has_failed_detail:
-                        resume_manager.mark_page_failed(keyword, current_page)
+                        resume_manager.mark_page_failed(
+                            keyword, current_page, cursor=page_cursor
+                        )
                     else:
-                        resume_manager.mark_page_done(keyword, current_page)
+                        resume_manager.mark_page_done(
+                            keyword, current_page, cursor=page_cursor
+                        )
                 except DataFetchError as e:
-                    resume_manager.mark_page_failed(keyword, page)
+                    resume_manager.mark_page_failed(
+                        keyword, page, cursor=cursor
+                    )
                     utils.logger.error(
                         f"[JuejinCrawler.search] Search content error for keyword "
                         f"{keyword}, page {page}: {e}. Stop this keyword and continue."
@@ -384,7 +403,7 @@ class JuejinCrawler(AbstractCrawler):
                     content=content_item,
                     crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
                     callback=juejin_store.batch_update_juejin_comments,
-                    max_count=config.JUEJIN_MAX_COMMENTS_PER_CONTENT,
+                    max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
                 resume_manager.mark_comment_done(
                     content_item.content_id,
@@ -422,8 +441,8 @@ class JuejinCrawler(AbstractCrawler):
 
             all_content_list = await self.juejin_client.get_all_articles_by_creator(
                 creator=creator_info,
-                crawl_interval=config.CRAWLER_COMMENT_SLEEP_SEC,
-                callback=juejin_store.batch_update_juejin_contents,
+                crawl_interval=config.CRAWLER_PAGE_SLEEP_SEC,
+                max_count=config.CRAWLER_MAX_NOTES_COUNT,
             )
 
             # Fetch full detail for each article so the body text is stored.
@@ -484,6 +503,9 @@ class JuejinCrawler(AbstractCrawler):
         """Get the information and comments of the specified articles."""
         task_list = []
         task_ids = []
+        semaphore = asyncio.Semaphore(
+            config.get_platform_max_concurrency_num("juejin")
+        )
         for article_id in config.JUEJIN_SPECIFIED_ID_LIST:
             article_id = str(article_id).strip()
             if not article_id:
@@ -505,7 +527,7 @@ class JuejinCrawler(AbstractCrawler):
             task_list.append(
                 self.get_note_detail(
                     article_id=article_id,
-                    semaphore=asyncio.Semaphore(config.get_platform_max_concurrency_num("juejin")),
+                    semaphore=semaphore,
                 )
             )
 
