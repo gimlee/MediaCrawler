@@ -391,6 +391,18 @@ BILI_MAX_CONCURRENCY_NUM = 2
 uv run main.py --platform zhihu --lt qrcode --type fix_content --save_data_option postgres
 该命令把content_text为空的内容，找到对应的URL，请求更新内容
 
+# P22
+现在系统了中参考其他的平台的实现方法，扩展实现 掘金(juejin) 平台的爬取功能。
+你检查下代码，是否满足以下需求：
+要求按照现有的代码结构进行扩展，支持现有的命令。支持数据落库。
+如果发现什么问题、bug或者功能缺陷，请修改完善代码。
+
+# P23
+要求掘金接入现有 Web API/WebUI
+补齐API 平台枚举和 WebUI
+
+
+
 
 uv run main.py --platform dy --lt qrcode --type search --save_data_option postgres
 uv run main.py --platform ks --lt qrcode --type search --save_data_option postgres
